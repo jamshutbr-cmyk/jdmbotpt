@@ -180,11 +180,19 @@ async def show_catalog(callback: CallbackQuery):
     except:
         pass
     
-    await callback.message.answer_photo(
-        photo=car['photo_id'],
-        caption=text,
-        reply_markup=car_navigation_kb(current_index, len(all_cars), car['id'], is_fav, is_adm)
-    )
+    try:
+        await callback.message.answer_photo(
+            photo=car['photo_id'],
+            caption=text,
+            reply_markup=car_navigation_kb(current_index, len(all_cars), car['id'], is_fav, is_adm)
+        )
+    except Exception as e:
+        # Если фото не отправилось — отправляем просто текст
+        logger.error(f"Ошибка отправки фото: {e}")
+        await callback.message.answer(
+            text,
+            reply_markup=car_navigation_kb(current_index, len(all_cars), car['id'], is_fav, is_adm)
+        )
     await callback.answer()
 
 
