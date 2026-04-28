@@ -4,7 +4,7 @@ from aiogram.types import CallbackQuery, Message
 
 from db_adapter import db
 from keyboards import admin_menu_kb, catalog_kb, confirm_delete_kb, cancel_kb, back_to_main_kb, search_results_kb, settings_menu_kb
-from states import AddCarStates, SettingsStates
+from states import AddCarStates, SettingsStates, EditCarStates
 from utils import is_admin, format_car_info
 
 router = Router()
@@ -211,7 +211,121 @@ async def process_locations(message: Message, state: FSMContext):
     )
 
 
-# ============= СПИСОК МАШИН =============
+# ============= РЕДАКТИРОВАНИЕ =============
+
+@router.callback_query(F.data.startswith("edit_"))
+async def edit_car_menu(callback: CallbackQuery):
+    """Меню редактирования машины"""
+    if not is_admin(callback.from_user.id):
+        await callback.answer("❌ Нет доступа", show_alert=True)
+        return
+    
+    car_id = int(callback.data.split("_")[1])
+    car = await db.get_car(car_id)
+    
+    if not car:
+        await callback.answer("❌ Машина не найдена", show_alert=True)
+        return
+    
+    text = (
+        f"✏️ <b>Редактирование</b>\n\n"
+        f"<b>{car['brand']} {car['model']}</b>\n\n"
+        f"Что хочешь изменить?"
+    )
+    
+    from aiogram.utils.keyboard import InlineKeyboardBuilder
+    from aiogram.types import InlineKeyboardButton
+    builder = InlineKeyboardBuilder()
+    builder.row(
+        InlineKeyboardButton(text="🏷 Марку", callback_data=f"editfield_brand_{car_id}"),
+        InlineKeyboardButton(text="🚗 Модель", callback_data=f"editfield_model_{car_id}")
+    )
+    builder.row(
+        InlineKeyboardButton(text="📅 Год", callback_data=f"editfield_year_{car_id}"),
+        InlineKeyboardButton(text="📝 Описание", callback_data=f"editfield_description_{car_id}")
+    )
+    builder.row(
+        InlineKeyboardButton(text="📍 Локации", callback_data=f"editfield_locations_{car_id}")
+    )
+    builder.row(
+        InlineKeyboardButton(text="🔙 Назад", callback_data=f"car_{car_id}")
+    )
+    
+    try:
+        await callback.message.edit_caption(caption=text, reply_markup=builder.as_markup())
+    except:
+        try:
+            await callback.message.edit_text(text, reply_markup=builder.as_markup())
+        except:
+            await callback.message.delete()
+            await callback.message.answer(text, reply_markup=builder.as_markup())
+    
+    await callback.answer()
+
+
+@router.callback_query(F.data.startswith("editfield_"))
+async def edit_car_field(callback: CallbackQuery, state: FSMContext):
+    """Начать редактирование конкретного поля"""
+    if not is_admin(callback.from_user.id):
+        await callback.answer("❌ Нет доступа", show_alert=True)
+        return
+    
+    parts = callback.data.split("_")
+    field = parts[1]
+    car_id = int(parts[2])
+    
+    field_names = {
+        'brand': 'марку',
+        'model': 'модель',
+        'year': 'год',
+        'description': 'описание',
+        'locations': 'локации'
+    }
+    
+    await state.update_data(edit_field=field, edit_car_id=car_id)
+    
+    text = f"✏️ Введи новое значение для поля <b>{field_names.get(field, field)}</b>:"
+    
+    try:
+        await callback.message.edit_caption(caption=text, reply_markup=cancel_kb())
+    except:
+        try:
+            await callback.message.edit_text(text, reply_markup=cancel_kb())
+        except:
+            await callback.message.delete()
+            await callback.message.answer(text, reply_markup=cancel_kb())
+    
+    await state.set_state(EditCarStates.waiting_for_value)
+    await callback.answer()
+
+
+@router.message(EditCarStates.waiting_for_value)
+async def process_edit_value(message: Message, state: FSMContext):
+    """Сохранить новое значение поля"""
+    data = await state.get_data()
+    field = data['edit_field']
+    car_id = data['edit_car_id']
+    
+    value = message.text.strip()
+    if value == '-':
+        value = None
+    
+    # Для года — конвертируем в число
+    if field == 'year' and value:
+        try:
+            value = int(value)
+        except ValueError:
+            await message.answer("❌ Год должен быть числом.")
+            return
+    
+    await db.update_car(car_id, **{field: value})
+    await state.clear()
+    
+    car = await db.get_car(car_id)
+    await message.answer(
+        f"✅ Поле обновлено!\n\n<b>{car['brand']} {car['model']}</b>",
+        reply_markup=back_to_main_kb()
+    )
 
 @router.callback_query(F.data == "admin_list")
 async def show_admin_list(callback: CallbackQuery):
