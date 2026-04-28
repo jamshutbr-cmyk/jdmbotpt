@@ -173,6 +173,9 @@ async def show_catalog(callback: CallbackQuery):
     is_adm = is_admin(callback.from_user.id)
     
     text = format_car_info(car)
+    # Жёсткая обрезка прямо перед отправкой
+    if len(text) > 1024:
+        text = text[:1020] + "..."
     
     # Отправляем/обновляем карточку
     try:
@@ -187,7 +190,6 @@ async def show_catalog(callback: CallbackQuery):
             reply_markup=car_navigation_kb(current_index, len(all_cars), car['id'], is_fav, is_adm)
         )
     except Exception as e:
-        # Если фото не отправилось — отправляем просто текст
         logger.error(f"Ошибка отправки фото: {e}")
         await callback.message.answer(
             text,

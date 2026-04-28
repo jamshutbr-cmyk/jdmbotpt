@@ -1,6 +1,8 @@
 from typing import Optional, Dict
 from config import ADMIN_IDS
 
+MAX_CAPTION_LENGTH = 1024  # Лимит Telegram для подписи к фото
+
 
 def is_admin(user_id: int) -> bool:
     """Проверка, является ли пользователь админом"""
@@ -15,13 +17,24 @@ def format_car_info(car: Dict, views: bool = True) -> str:
         text += f"📅 Год: {car['year']}\n"
     
     if car.get('description'):
-        text += f"\n📝 Описание:\n{car['description']}\n"
+        # Обрезаем описание если слишком длинное
+        desc = car['description']
+        if len(text) + len(desc) > MAX_CAPTION_LENGTH - 200:
+            desc = desc[:200] + "..."
+        text += f"\n📝 {desc}\n"
     
     if car.get('locations'):
-        text += f"\n📍 Где можно встретить:\n{car['locations']}\n"
+        loc = car['locations']
+        if len(text) + len(loc) > MAX_CAPTION_LENGTH - 100:
+            loc = loc[:100] + "..."
+        text += f"\n📍 {loc}\n"
     
     if views and car.get('views'):
         text += f"\n👁 Просмотров: {car['views']}"
+    
+    # Финальная проверка — обрезаем если всё равно длинно
+    if len(text) > MAX_CAPTION_LENGTH:
+        text = text[:MAX_CAPTION_LENGTH - 3] + "..."
     
     return text
 

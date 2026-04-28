@@ -263,10 +263,22 @@ async def confirm_delete(callback: CallbackQuery):
         f"⚠️ Это действие нельзя отменить!"
     )
     
-    await callback.message.edit_caption(
-        caption=text,
-        reply_markup=confirm_delete_kb(car_id)
-    )
+    # Сообщение может быть с фото (caption) или текстовым
+    try:
+        await callback.message.edit_caption(
+            caption=text,
+            reply_markup=confirm_delete_kb(car_id)
+        )
+    except:
+        try:
+            await callback.message.edit_text(
+                text=text,
+                reply_markup=confirm_delete_kb(car_id)
+            )
+        except:
+            await callback.message.delete()
+            await callback.message.answer(text, reply_markup=confirm_delete_kb(car_id))
+    
     await callback.answer()
 
 
