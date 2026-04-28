@@ -338,7 +338,12 @@ async def edit_welcome(callback: CallbackQuery, state: FSMContext):
         "Поддерживаются HTML теги: <b>жирный</b>, <i>курсив</i>"
     )
     
-    await callback.message.edit_text(text, reply_markup=cancel_kb())
+    try:
+        await callback.message.edit_text(text, reply_markup=cancel_kb())
+    except:
+        await callback.message.delete()
+        await callback.message.answer(text, reply_markup=cancel_kb())
+    
     await state.set_state(SettingsStates.waiting_for_welcome_text)
     await callback.answer()
 
@@ -381,7 +386,12 @@ async def edit_bot_name(callback: CallbackQuery, state: FSMContext):
         "Оно будет отображаться в главном меню."
     )
     
-    await callback.message.edit_text(text, reply_markup=cancel_kb())
+    try:
+        await callback.message.edit_text(text, reply_markup=cancel_kb())
+    except:
+        await callback.message.delete()
+        await callback.message.answer(text, reply_markup=cancel_kb())
+    
     await state.set_state(SettingsStates.waiting_for_bot_name)
     await callback.answer()
 
@@ -420,16 +430,21 @@ async def reset_settings(callback: CallbackQuery):
     for key, value in DEFAULT_SETTINGS.items():
         await db.set_setting(key, value)
     
-    # Удаляем фото приветствия
     await db.set_setting('welcome_photo', '')
     
-    await callback.message.edit_text(
+    text = (
         "🔄 <b>Настройки сброшены!</b>\n\n"
         f"🏷 Название: <b>{DEFAULT_SETTINGS['bot_name']}</b>\n"
         f"💬 Приветствие восстановлено до стандартного.\n"
-        f"🖼 Фото приветствия удалено.",
-        reply_markup=settings_menu_kb()
+        f"🖼 Фото приветствия удалено."
     )
+    
+    try:
+        await callback.message.edit_text(text, reply_markup=settings_menu_kb())
+    except:
+        await callback.message.delete()
+        await callback.message.answer(text, reply_markup=settings_menu_kb())
+    
     await callback.answer("✅ Сброшено!")
 
 
@@ -453,13 +468,19 @@ async def edit_welcome_photo(callback: CallbackQuery, state: FSMContext):
     
     status = "✅ Фото установлено" if current_photo else "❌ Фото не установлено"
     
-    await callback.message.edit_text(
+    text = (
         f"🖼 <b>Фото приветствия</b>\n\n"
         f"Статус: {status}\n\n"
         f"Отправь фото которое будет показываться при /start.\n"
-        f"Или нажми 'Удалить фото' чтобы убрать текущее.",
-        reply_markup=builder.as_markup()
+        f"Или нажми 'Удалить фото' чтобы убрать текущее."
     )
+    
+    try:
+        await callback.message.edit_text(text, reply_markup=builder.as_markup())
+    except:
+        await callback.message.delete()
+        await callback.message.answer(text, reply_markup=builder.as_markup())
+    
     await state.set_state(SettingsStates.waiting_for_welcome_photo)
     await callback.answer()
 
