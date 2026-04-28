@@ -28,7 +28,31 @@ def admin_menu_kb() -> InlineKeyboardMarkup:
         InlineKeyboardButton(text="📋 Список машин", callback_data="admin_list")
     )
     builder.row(
+        InlineKeyboardButton(text="⚙️ Настройки", callback_data="admin_settings")
+    )
+    builder.row(
         InlineKeyboardButton(text="🔙 Назад", callback_data="back_to_main")
+    )
+    return builder.as_markup()
+
+
+def settings_menu_kb() -> InlineKeyboardMarkup:
+    """Меню настроек"""
+    builder = InlineKeyboardBuilder()
+    builder.row(
+        InlineKeyboardButton(text="💬 Приветствие", callback_data="settings_welcome")
+    )
+    builder.row(
+        InlineKeyboardButton(text="🏷 Название бота", callback_data="settings_bot_name")
+    )
+    builder.row(
+        InlineKeyboardButton(text="🖼 Фото приветствия", callback_data="settings_welcome_photo")
+    )
+    builder.row(
+        InlineKeyboardButton(text="🔄 Сбросить всё", callback_data="settings_reset")
+    )
+    builder.row(
+        InlineKeyboardButton(text="🔙 Админ-панель", callback_data="admin_panel")
     )
     return builder.as_markup()
 

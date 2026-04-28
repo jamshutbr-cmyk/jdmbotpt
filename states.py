@@ -20,3 +20,10 @@ class EditCarStates(StatesGroup):
     """Состояния для редактирования"""
     waiting_for_field = State()
     waiting_for_value = State()
+
+
+class SettingsStates(StatesGroup):
+    """Состояния для настроек"""
+    waiting_for_welcome_text = State()
+    waiting_for_bot_name = State()
+    waiting_for_welcome_photo = State()

@@ -52,6 +52,26 @@ class PostgresDatabase:
                     FOREIGN KEY (car_id) REFERENCES cars(id) ON DELETE CASCADE
                 )
             ''')
+            
+            # Таблица настроек
+            await conn.execute('''
+                CREATE TABLE IF NOT EXISTS settings (
+                    key TEXT PRIMARY KEY,
+                    value TEXT
+                )
+            ''')
+            
+            # Добавляем дефолтные настройки
+            await conn.execute('''
+                INSERT INTO settings (key, value) 
+                VALUES ('welcome_text', '🚗 <b>Добро пожаловать в JDM Cars Bot!</b>\n\nЗдесь ты найдешь крутые тачки, сфотографированные на улицах города.\n\nВыбери действие из меню ниже:')
+                ON CONFLICT (key) DO NOTHING
+            ''')
+            await conn.execute('''
+                INSERT INTO settings (key, value) 
+                VALUES ('bot_name', 'JDM Cars Bot')
+                ON CONFLICT (key) DO NOTHING
+            ''')
 
     async def add_car(self, brand: str, model: str, year: Optional[int], 
                      description: Optional[str], locations: Optional[str], 
@@ -193,6 +213,21 @@ class PostgresDatabase:
                 ORDER BY f.added_at DESC
             ''', user_id)
             return [dict(row) for row in rows]
+
+    # Настройки
+    async def get_setting(self, key: str) -> Optional[str]:
+        """Получить настройку"""
+        async with self.pool.acquire() as conn:
+            value = await conn.fetchval('SELECT value FROM settings WHERE key = $1', key)
+            return value
+
+    async def set_setting(self, key: str, value: str):
+        """Установить настройку"""
+        async with self.pool.acquire() as conn:
+            await conn.execute('''
+                INSERT INTO settings (key, value) VALUES ($1, $2)
+                ON CONFLICT (key) DO UPDATE SET value = $2
+            ''', key, value)
 
     async def close(self):
         """Закрыть пул соединений"""

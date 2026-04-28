@@ -47,6 +47,24 @@ class Database:
                 )
             ''')
             
+            # Таблица настроек
+            await db.execute('''
+                CREATE TABLE IF NOT EXISTS settings (
+                    key TEXT PRIMARY KEY,
+                    value TEXT
+                )
+            ''')
+            
+            # Добавляем дефолтные настройки
+            await db.execute('''
+                INSERT OR IGNORE INTO settings (key, value) 
+                VALUES ('welcome_text', '🚗 <b>Добро пожаловать в JDM Cars Bot!</b>\n\nЗдесь ты найдешь крутые тачки, сфотографированные на улицах города.\n\nВыбери действие из меню ниже:')
+            ''')
+            await db.execute('''
+                INSERT OR IGNORE INTO settings (key, value) 
+                VALUES ('bot_name', 'JDM Cars Bot')
+            ''')
+            
             await db.commit()
 
     async def add_car(self, brand: str, model: str, year: Optional[int], 
@@ -207,6 +225,22 @@ class Database:
             ''', (user_id,))
             rows = await cursor.fetchall()
             return [dict(row) for row in rows]
+
+    # Настройки
+    async def get_setting(self, key: str) -> Optional[str]:
+        """Получить настройку"""
+        async with aiosqlite.connect(self.db_path) as db:
+            cursor = await db.execute('SELECT value FROM settings WHERE key = ?', (key,))
+            row = await cursor.fetchone()
+            return row[0] if row else None
+
+    async def set_setting(self, key: str, value: str):
+        """Установить настройку"""
+        async with aiosqlite.connect(self.db_path) as db:
+            await db.execute('''
+                INSERT OR REPLACE INTO settings (key, value) VALUES (?, ?)
+            ''', (key, value))
+            await db.commit()
 
 
 db = Database()

@@ -39,25 +39,34 @@ CARS_PER_PAGE = 6
 @dp.message(Command("start"))
 async def cmd_start(message: Message):
     """Команда /start"""
-    welcome_text = (
-        "🚗 <b>Добро пожаловать в JDM Cars Bot!</b>\n\n"
-        "Здесь ты найдешь крутые тачки, сфотографированные на улицах города.\n\n"
-        "Выбери действие из меню ниже:"
-    )
+    welcome_text = await db.get_setting('welcome_text')
+    if not welcome_text:
+        welcome_text = (
+            "🚗 <b>Добро пожаловать в JDM Cars Bot!</b>\n\n"
+            "Здесь ты найдешь крутые тачки, сфотографированные на улицах города.\n\n"
+            "Выбери действие из меню ниже:"
+        )
     
     keyboard = main_menu_kb()
     
-    # Добавляем админ-кнопку для админов
     if is_admin(message.from_user.id):
-        from aiogram.utils.keyboard import InlineKeyboardBuilder
         builder = InlineKeyboardBuilder()
         for row in keyboard.inline_keyboard:
             builder.row(*row)
-        from aiogram.types import InlineKeyboardButton
         builder.row(InlineKeyboardButton(text="⚙️ Админ-панель", callback_data="admin_panel"))
         keyboard = builder.as_markup()
     
-    await message.answer(welcome_text, reply_markup=keyboard)
+    # Проверяем, есть ли фото приветствия
+    welcome_photo = await db.get_setting('welcome_photo')
+    
+    if welcome_photo:
+        await message.answer_photo(
+            photo=welcome_photo,
+            caption=welcome_text,
+            reply_markup=keyboard
+        )
+    else:
+        await message.answer(welcome_text, reply_markup=keyboard)
 
 
 @dp.message(Command("help"))
@@ -84,23 +93,18 @@ async def back_to_main(callback: CallbackQuery, state: FSMContext):
     """Возврат в главное меню"""
     await state.clear()
     
-    welcome_text = (
-        "🚗 <b>JDM Cars Bot</b>\n\n"
-        "Выбери действие из меню:"
-    )
+    bot_name = await db.get_setting('bot_name') or 'JDM Cars Bot'
+    welcome_text = f"🚗 <b>{bot_name}</b>\n\nВыбери действие из меню:"
     
     keyboard = main_menu_kb()
     
     if is_admin(callback.from_user.id):
-        from aiogram.utils.keyboard import InlineKeyboardBuilder
         builder = InlineKeyboardBuilder()
         for row in keyboard.inline_keyboard:
             builder.row(*row)
-        from aiogram.types import InlineKeyboardButton
         builder.row(InlineKeyboardButton(text="⚙️ Админ-панель", callback_data="admin_panel"))
         keyboard = builder.as_markup()
     
-    # Проверяем, есть ли текст в сообщении (если фото - удаляем и отправляем новое)
     try:
         await callback.message.edit_text(welcome_text, reply_markup=keyboard)
     except:
@@ -113,22 +117,24 @@ async def back_to_main(callback: CallbackQuery, state: FSMContext):
 @dp.callback_query(F.data == "about")
 async def about_bot(callback: CallbackQuery):
     """О боте"""
+    bot_name = await db.get_setting('bot_name') or 'JDM Cars Bot'
     about_text = (
-        "ℹ️ <b>О боте</b>\n\n"
-        "Этот бот создан для каталогизации крутых тачек, "
-        "сфотографированных на улицах города.\n\n"
-        "🎯 Здесь ты найдешь:\n"
-        "• JDM легенды\n"
-        "• Редкие модели\n"
-        "• Тюнингованные машины\n"
-        "• И многое другое!\n\n"
-        "📸 Все фото сделаны энтузиастами автомобильной культуры."
+        f"ℹ️ <b>О боте</b>\n\n"
+        f"Этот бот создан для каталогизации крутых тачек, "
+        f"сфотографированных на улицах города.\n\n"
+        f"🎯 Здесь ты найдешь:\n"
+        f"• JDM легенды\n"
+        f"• Редкие модели\n"
+        f"• Тюнингованные машины\n"
+        f"• И многое другое!\n\n"
+        f"📸 Все фото сделаны энтузиастами автомобильной культуры.\n\n"
+        f"<i>Создано <a href='https://t.me/pr0stoy4elovek'>@pr0stoy4elovek</a></i>"
     )
     try:
-        await callback.message.edit_text(about_text, reply_markup=back_to_main_kb())
+        await callback.message.edit_text(about_text, reply_markup=back_to_main_kb(), disable_web_page_preview=True)
     except:
         await callback.message.delete()
-        await callback.message.answer(about_text, reply_markup=back_to_main_kb())
+        await callback.message.answer(about_text, reply_markup=back_to_main_kb(), disable_web_page_preview=True)
     await callback.answer()
 
 

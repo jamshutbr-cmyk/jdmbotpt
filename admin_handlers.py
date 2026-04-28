@@ -3,8 +3,8 @@ from aiogram.fsm.context import FSMContext
 from aiogram.types import CallbackQuery, Message
 
 from db_adapter import db
-from keyboards import admin_menu_kb, catalog_kb, confirm_delete_kb, cancel_kb, back_to_main_kb, search_results_kb, search_results_kb
-from states import AddCarStates
+from keyboards import admin_menu_kb, catalog_kb, confirm_delete_kb, cancel_kb, back_to_main_kb, search_results_kb, settings_menu_kb
+from states import AddCarStates, SettingsStates
 from utils import is_admin, format_car_info
 
 router = Router()
@@ -292,3 +292,210 @@ async def delete_car(callback: CallbackQuery):
         reply_markup=admin_menu_kb()
     )
     await callback.answer()
+
+
+# ============= НАСТРОЙКИ =============
+
+@router.callback_query(F.data == "admin_settings")
+async def show_settings(callback: CallbackQuery):
+    """Показать настройки"""
+    if not is_admin(callback.from_user.id):
+        await callback.answer("❌ Нет доступа", show_alert=True)
+        return
+    
+    bot_name = await db.get_setting('bot_name') or 'JDM Cars Bot'
+    welcome = await db.get_setting('welcome_text') or '—'
+    # Обрезаем приветствие для превью
+    welcome_preview = welcome[:60] + '...' if len(welcome) > 60 else welcome
+    
+    text = (
+        "⚙️ <b>Настройки бота</b>\n\n"
+        f"🏷 Название: <b>{bot_name}</b>\n"
+        f"💬 Приветствие: <i>{welcome_preview}</i>"
+    )
+    
+    try:
+        await callback.message.edit_text(text, reply_markup=settings_menu_kb())
+    except:
+        await callback.message.delete()
+        await callback.message.answer(text, reply_markup=settings_menu_kb())
+    await callback.answer()
+
+
+@router.callback_query(F.data == "settings_welcome")
+async def edit_welcome(callback: CallbackQuery, state: FSMContext):
+    """Изменить приветствие"""
+    if not is_admin(callback.from_user.id):
+        await callback.answer("❌ Нет доступа", show_alert=True)
+        return
+    
+    current_text = await db.get_setting('welcome_text') or '—'
+    
+    text = (
+        "💬 <b>Изменение приветствия</b>\n\n"
+        f"Текущее:\n<i>{current_text}</i>\n\n"
+        "Отправь новый текст.\n"
+        "Поддерживаются HTML теги: <b>жирный</b>, <i>курсив</i>"
+    )
+    
+    await callback.message.edit_text(text, reply_markup=cancel_kb())
+    await state.set_state(SettingsStates.waiting_for_welcome_text)
+    await callback.answer()
+
+
+@router.message(SettingsStates.waiting_for_welcome_text)
+async def process_welcome_text(message: Message, state: FSMContext):
+    """Обработка нового приветствия"""
+    new_text = message.text.strip()
+    
+    if len(new_text) < 5:
+        await message.answer("❌ Текст слишком короткий. Минимум 5 символов.")
+        return
+    
+    if len(new_text) > 1000:
+        await message.answer("❌ Текст слишком длинный. Максимум 1000 символов.")
+        return
+    
+    await db.set_setting('welcome_text', new_text)
+    await state.clear()
+    
+    await message.answer(
+        "✅ <b>Приветствие обновлено!</b>\n\n" + new_text,
+        reply_markup=settings_menu_kb()
+    )
+
+
+@router.callback_query(F.data == "settings_bot_name")
+async def edit_bot_name(callback: CallbackQuery, state: FSMContext):
+    """Изменить название бота"""
+    if not is_admin(callback.from_user.id):
+        await callback.answer("❌ Нет доступа", show_alert=True)
+        return
+    
+    current_name = await db.get_setting('bot_name') or 'JDM Cars Bot'
+    
+    text = (
+        "🏷 <b>Изменение названия бота</b>\n\n"
+        f"Текущее название: <b>{current_name}</b>\n\n"
+        "Отправь новое название.\n"
+        "Оно будет отображаться в главном меню."
+    )
+    
+    await callback.message.edit_text(text, reply_markup=cancel_kb())
+    await state.set_state(SettingsStates.waiting_for_bot_name)
+    await callback.answer()
+
+
+@router.message(SettingsStates.waiting_for_bot_name)
+async def process_bot_name(message: Message, state: FSMContext):
+    """Обработка нового названия"""
+    new_name = message.text.strip()
+    
+    if len(new_name) < 2:
+        await message.answer("❌ Название слишком короткое.")
+        return
+    
+    if len(new_name) > 50:
+        await message.answer("❌ Название слишком длинное. Максимум 50 символов.")
+        return
+    
+    await db.set_setting('bot_name', new_name)
+    await state.clear()
+    
+    await message.answer(
+        f"✅ <b>Название обновлено!</b>\n\nНовое название: <b>{new_name}</b>",
+        reply_markup=settings_menu_kb()
+    )
+
+
+@router.callback_query(F.data == "settings_reset")
+async def reset_settings(callback: CallbackQuery):
+    """Сброс настроек до дефолтных"""
+    if not is_admin(callback.from_user.id):
+        await callback.answer("❌ Нет доступа", show_alert=True)
+        return
+    
+    from config import DEFAULT_SETTINGS
+    
+    for key, value in DEFAULT_SETTINGS.items():
+        await db.set_setting(key, value)
+    
+    # Удаляем фото приветствия
+    await db.set_setting('welcome_photo', '')
+    
+    await callback.message.edit_text(
+        "🔄 <b>Настройки сброшены!</b>\n\n"
+        f"🏷 Название: <b>{DEFAULT_SETTINGS['bot_name']}</b>\n"
+        f"💬 Приветствие восстановлено до стандартного.\n"
+        f"🖼 Фото приветствия удалено.",
+        reply_markup=settings_menu_kb()
+    )
+    await callback.answer("✅ Сброшено!")
+
+
+@router.callback_query(F.data == "settings_welcome_photo")
+async def edit_welcome_photo(callback: CallbackQuery, state: FSMContext):
+    """Управление фото приветствия"""
+    if not is_admin(callback.from_user.id):
+        await callback.answer("❌ Нет доступа", show_alert=True)
+        return
+    
+    current_photo = await db.get_setting('welcome_photo')
+    
+    from aiogram.utils.keyboard import InlineKeyboardBuilder
+    from aiogram.types import InlineKeyboardButton
+    builder = InlineKeyboardBuilder()
+    
+    if current_photo:
+        builder.row(InlineKeyboardButton(text="🗑 Удалить фото", callback_data="settings_delete_welcome_photo"))
+    
+    builder.row(InlineKeyboardButton(text="❌ Отмена", callback_data="admin_settings"))
+    
+    status = "✅ Фото установлено" if current_photo else "❌ Фото не установлено"
+    
+    await callback.message.edit_text(
+        f"🖼 <b>Фото приветствия</b>\n\n"
+        f"Статус: {status}\n\n"
+        f"Отправь фото которое будет показываться при /start.\n"
+        f"Или нажми 'Удалить фото' чтобы убрать текущее.",
+        reply_markup=builder.as_markup()
+    )
+    await state.set_state(SettingsStates.waiting_for_welcome_photo)
+    await callback.answer()
+
+
+@router.message(SettingsStates.waiting_for_welcome_photo, F.photo)
+async def process_welcome_photo(message: Message, state: FSMContext):
+    """Сохранение фото приветствия"""
+    photo_id = message.photo[-1].file_id
+    await db.set_setting('welcome_photo', photo_id)
+    await state.clear()
+    
+    await message.answer_photo(
+        photo=photo_id,
+        caption="✅ <b>Фото приветствия установлено!</b>\n\nТеперь оно будет показываться при /start.",
+        reply_markup=settings_menu_kb()
+    )
+
+
+@router.message(SettingsStates.waiting_for_welcome_photo)
+async def invalid_welcome_photo(message: Message):
+    """Неверный формат"""
+    await message.answer("❌ Отправь фото!")
+
+
+@router.callback_query(F.data == "settings_delete_welcome_photo")
+async def delete_welcome_photo(callback: CallbackQuery, state: FSMContext):
+    """Удалить фото приветствия"""
+    if not is_admin(callback.from_user.id):
+        await callback.answer("❌ Нет доступа", show_alert=True)
+        return
+    
+    await db.set_setting('welcome_photo', '')
+    await state.clear()
+    
+    await callback.message.edit_text(
+        "🗑 <b>Фото приветствия удалено!</b>\n\nПри /start будет показываться только текст.",
+        reply_markup=settings_menu_kb()
+    )
+    await callback.answer("✅ Удалено!")

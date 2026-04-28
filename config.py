@@ -17,9 +17,18 @@ USE_POSTGRES = DATABASE_URL is not None
 PHOTOS_DIR = 'photos'
 os.makedirs(PHOTOS_DIR, exist_ok=True)
 
-# Proxy (раскомментируй если нужен)
-# PROXY = "http://proxy.server:port"
+# Proxy
 PROXY = None
 
 # Railway environment
 IS_RAILWAY = os.getenv('RAILWAY_ENVIRONMENT') is not None
+
+# Дефолтные настройки бота
+DEFAULT_SETTINGS = {
+    'welcome_text': (
+        '🚗 <b>Добро пожаловать в JDM Cars Bot!</b>\n\n'
+        'Здесь ты найдешь крутые тачки, сфотографированные на улицах города.\n\n'
+        'Выбери действие из меню ниже:'
+    ),
+    'bot_name': 'JDM Cars Bot',
+}
