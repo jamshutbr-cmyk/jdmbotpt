@@ -18,6 +18,7 @@ from keyboards import (
 from states import AddCarStates, SearchStates
 from utils import is_admin, format_car_info, format_stats
 from subscription_check import check_all_subscriptions, build_subscribe_message
+from subscription_middleware import SubscriptionMiddleware
 import admin_handlers
 import support_handlers
 import suggest_handlers
@@ -36,6 +37,10 @@ dp.include_router(admin_handlers.router)
 dp.include_router(support_handlers.router)
 dp.include_router(suggest_handlers.router)
 dp.include_router(subscription_handlers.router)
+
+# Middleware для проверки подписки при каждом действии
+dp.message.middleware(SubscriptionMiddleware())
+dp.callback_query.middleware(SubscriptionMiddleware())
 
 # Константы
 CARS_PER_PAGE = 6
