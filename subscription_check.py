@@ -21,8 +21,15 @@ async def is_subscribed(bot: Bot, user_id: int, channel_id: str) -> bool:
             ChatMemberStatus.BANNED,
         ]
     except Exception as e:
-        logger.warning(f"Cannot check subscription for user {user_id} in {channel_id}: {e}")
-        # Если ошибка — НЕ пропускаем, блокируем
+        err = str(e)
+        logger.warning(f"Cannot check subscription for user {user_id} in {channel_id}: {err}")
+        # Если пользователь забанен — точно не подписан
+        if 'BANNED' in err or 'kicked' in err.lower():
+            return False
+        # Если бот не в канале или другая ошибка доступа — пропускаем проверку
+        if 'bot is not a member' in err.lower() or 'chat not found' in err.lower():
+            logger.error(f"Bot is not in channel {channel_id}! Add bot as admin.")
+            return True  # пропускаем если бот не в канале
         return False
 
 
