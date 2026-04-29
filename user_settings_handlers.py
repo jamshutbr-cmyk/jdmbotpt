@@ -126,24 +126,33 @@ async def process_broadcast(message: Message, state: FSMContext, bot: Bot):
 
     await state.clear()
 
-    users = await db.get_all_users()
-
-    # Регистрируем отправителя если нет
+    # Регистрируем отправителя
     await db.register_user(
         message.from_user.id,
         message.from_user.username or '',
         message.from_user.first_name or ''
     )
 
+    users = await db.get_all_users()
+
+    if not users:
+        await message.answer(
+            "⚠️ В базе нет пользователей.\n\n"
+            "Пользователи появляются после того как нажмут /start в боте."
+        )
+        return
+
     sent = 0
     failed = 0
 
-    status_msg = await message.answer(f"📤 Начинаю рассылку для {len(users)} пользователей...")
+    status_msg = await message.answer(
+        f"📤 Начинаю рассылку...\n"
+        f"Пользователей в базе: <b>{len(users)}</b>"
+    )
 
     for user in users:
         try:
             if message.photo:
-                # Фото с подписью
                 await bot.send_photo(
                     chat_id=user['user_id'],
                     photo=message.photo[-1].file_id,
@@ -155,16 +164,21 @@ async def process_broadcast(message: Message, state: FSMContext, bot: Bot):
                     text=message.text
                 )
             sent += 1
-            await asyncio.sleep(0.05)  # защита от флуда
         except Exception as e:
             failed += 1
+            import logging
+            logging.getLogger(__name__).warning(f"Broadcast failed for {user['user_id']}: {e}")
+
+        await asyncio.sleep(0.05)
 
     builder = InlineKeyboardBuilder()
     builder.row(InlineKeyboardButton(text="🔙 Админ-панель", callback_data="admin_panel"))
 
     await status_msg.edit_text(
         f"✅ <b>Рассылка завершена!</b>\n\n"
+        f"👥 Всего пользователей: {len(users)}\n"
         f"📤 Отправлено: {sent}\n"
-        f"❌ Не доставлено: {failed}",
+        f"❌ Не доставлено: {failed}\n\n"
+        f"<i>Не доставлено — пользователи заблокировали бота</i>",
         reply_markup=builder.as_markup()
     )
