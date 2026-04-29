@@ -15,27 +15,22 @@ async def is_subscribed(bot: Bot, user_id: int, channel_id: str) -> bool:
     try:
         member = await bot.get_chat_member(chat_id=channel_id, user_id=user_id)
         logger.info(f"User {user_id} in channel {channel_id}: status={member.status}")
-        result = member.status not in [
+        return member.status not in [
             ChatMemberStatus.LEFT,
             ChatMemberStatus.KICKED,
             ChatMemberStatus.BANNED,
         ]
-        return result
     except Exception as e:
         err = str(e).upper()
         logger.warning(f"get_chat_member error for user {user_id} in {channel_id}: {e}")
 
-        # Пользователь заблокировал бота — это не значит что он не подписан на канал
-        # Проверяем статус через другой способ
-        if 'BANNED' in err or 'BLOCKED' in err or 'BOT_BLOCKED' in err:
-            # Пробуем ещё раз через chat username если есть
-            logger.info(f"User {user_id} blocked bot but may be subscribed to channel")
-            return True  # не можем проверить — пропускаем
-
-        if 'CHAT_NOT_FOUND' in err or 'BOT IS NOT A MEMBER' in err.upper():
+        if 'CHAT_NOT_FOUND' in err or 'BOT IS NOT A MEMBER' in err:
             logger.error(f"Bot is not in channel {channel_id}!")
-            return True
+            return True  # бот не в канале — пропускаем
 
+        # BANNED/BLOCKED — пользователь заблокировал бота в личке
+        # Это НЕ означает что он не подписан на канал
+        # Но мы уже не можем проверить — считаем НЕ подписан (строгая проверка)
         return False
 
 
