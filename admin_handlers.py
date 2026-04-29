@@ -653,11 +653,11 @@ async def delete_welcome_photo(callback: CallbackQuery, state: FSMContext):
 
 # ============= УПРАВЛЕНИЕ АДМИНАМИ =============
 
+from aiogram.fsm.state import StatesGroup, State
+
+
 class AddAdminState(StatesGroup):
     waiting_for_id = State()
-
-
-from aiogram.fsm.state import StatesGroup, State
 
 
 @router.callback_query(F.data == "manage_admins")
