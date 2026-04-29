@@ -378,30 +378,37 @@ async def check_subscription_callback(callback: CallbackQuery, bot: Bot):
             await callback.message.edit_text(text, reply_markup=keyboard)
         except:
             pass
-    else:
-        await callback.answer("✅ Отлично! Добро пожаловать!")
-        try:
-            await callback.message.delete()
-        except:
-            pass
+        return
 
-        from keyboards import main_menu_kb
-        from aiogram.utils.keyboard import InlineKeyboardBuilder
-        from aiogram.types import InlineKeyboardButton
+    # Подписан — показываем главное меню
+    await callback.answer("✅ Отлично! Добро пожаловать!")
 
-        bot_name = await db.get_setting('bot_name') or 'JDM Cars Bot'
-        welcome_text = await db.get_setting('welcome_text') or f"🚗 <b>{bot_name}</b>\n\nВыбери действие из меню:"
+    from keyboards import main_menu_kb
+    from aiogram.utils.keyboard import InlineKeyboardBuilder
+    from aiogram.types import InlineKeyboardButton
 
-        keyboard = main_menu_kb()
-        if await is_admin(callback.from_user.id):
-            builder = InlineKeyboardBuilder()
-            for row in keyboard.inline_keyboard:
-                builder.row(*row)
-            builder.row(InlineKeyboardButton(text="⚙️ Админ-панель", callback_data="admin_panel"))
-            keyboard = builder.as_markup()
+    bot_name = await db.get_setting('bot_name') or 'JDM Cars Bot'
+    welcome_text = await db.get_setting('welcome_text') or f"🚗 <b>{bot_name}</b>\n\nВыбери действие из меню:"
 
-        welcome_photo = await db.get_setting('welcome_photo')
+    keyboard = main_menu_kb()
+    if await is_admin(callback.from_user.id):
+        builder = InlineKeyboardBuilder()
+        for row in keyboard.inline_keyboard:
+            builder.row(*row)
+        builder.row(InlineKeyboardButton(text="⚙️ Админ-панель", callback_data="admin_panel"))
+        keyboard = builder.as_markup()
+
+    welcome_photo = await db.get_setting('welcome_photo')
+    try:
+        await callback.message.delete()
+    except:
+        pass
+
+    try:
         if welcome_photo:
             await callback.message.answer_photo(photo=welcome_photo, caption=welcome_text, reply_markup=keyboard)
         else:
             await callback.message.answer(welcome_text, reply_markup=keyboard)
+    except Exception as e:
+        import logging
+        logging.getLogger(__name__).error(f"Error sending welcome: {e}")
