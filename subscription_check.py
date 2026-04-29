@@ -3,7 +3,7 @@
 Работает как middleware — перехватывает все апдейты и проверяет подписку.
 """
 from aiogram import Bot
-from aiogram.types import ChatMemberStatus
+from aiogram.enums import ChatMemberStatus
 from aiogram.utils.keyboard import InlineKeyboardBuilder
 from aiogram.types import InlineKeyboardButton
 
