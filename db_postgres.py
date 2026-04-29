@@ -72,6 +72,16 @@ class PostgresDatabase:
                     last_seen TIMESTAMP DEFAULT CURRENT_TIMESTAMP
                 )
             ''')
+
+            # Миграция: добавляем колонки если их нет
+            try:
+                await conn.execute('ALTER TABLE users ADD COLUMN IF NOT EXISTS notify_new_cars INTEGER DEFAULT 0')
+            except:
+                pass
+            try:
+                await conn.execute('ALTER TABLE users ADD COLUMN IF NOT EXISTS show_username INTEGER DEFAULT 1')
+            except:
+                pass
             await conn.execute('''
                 CREATE TABLE IF NOT EXISTS required_channels (
                     id SERIAL PRIMARY KEY,
