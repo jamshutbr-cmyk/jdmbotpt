@@ -1,25 +1,29 @@
 """
 Система проверки подписки на каналы.
-Работает как middleware — перехватывает все апдейты и проверяет подписку.
 """
+import logging
 from aiogram import Bot
 from aiogram.enums import ChatMemberStatus
 from aiogram.utils.keyboard import InlineKeyboardBuilder
 from aiogram.types import InlineKeyboardButton
+
+logger = logging.getLogger(__name__)
 
 
 async def is_subscribed(bot: Bot, user_id: int, channel_id: str) -> bool:
     """Проверить подписан ли пользователь на канал"""
     try:
         member = await bot.get_chat_member(chat_id=channel_id, user_id=user_id)
+        logger.info(f"User {user_id} in channel {channel_id}: status={member.status}")
         return member.status not in [
             ChatMemberStatus.LEFT,
             ChatMemberStatus.KICKED,
             ChatMemberStatus.BANNED,
         ]
-    except Exception:
-        # Если бот не в канале или канал не найден — пропускаем
-        return True
+    except Exception as e:
+        logger.warning(f"Cannot check subscription for user {user_id} in {channel_id}: {e}")
+        # Если ошибка — НЕ пропускаем, блокируем
+        return False
 
 
 async def check_all_subscriptions(bot: Bot, user_id: int, channels: list) -> list:
@@ -29,7 +33,9 @@ async def check_all_subscriptions(bot: Bot, user_id: int, channels: list) -> lis
     """
     not_subscribed = []
     for channel in channels:
-        if not channel.get('is_active', 1):  # пропускаем неактивные
+        # is_active может быть int (1/0) или bool (True/False) в зависимости от БД
+        is_active = channel.get('is_active', 1)
+        if is_active in (0, False):
             continue
         subscribed = await is_subscribed(bot, user_id, channel['channel_id'])
         if not subscribed:

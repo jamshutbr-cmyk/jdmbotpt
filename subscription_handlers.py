@@ -71,7 +71,7 @@ async def toggle_subscription(callback: CallbackQuery):
 
     if new_state == '1':
         channels = await db.get_required_channels()
-        active = [c for c in channels if c.get('is_active', 1)]
+        active = [c for c in channels if c.get('is_active', 1) not in (0, False)]
         if not active:
             await callback.answer("⚠️ Сначала добавь хотя бы один активный канал!", show_alert=True)
             return
@@ -115,8 +115,9 @@ async def list_channels(callback: CallbackQuery):
 
     for ch in channels:
         active = ch.get('is_active', 1)
-        status_emoji = "✅" if active else "❌"
-        toggle_text = "🔴 Выкл" if active else "🟢 Вкл"
+        is_on = active not in (0, False)
+        status_emoji = "✅" if is_on else "❌"
+        toggle_text = "🔴 Выкл" if is_on else "🟢 Вкл"
         text += f"{status_emoji} <b>{ch['channel_name']}</b>\n   ID: <code>{ch['channel_id']}</code>\n\n"
         builder.row(
             InlineKeyboardButton(text=f"{status_emoji} {ch['channel_name']}", callback_data="sub_noop"),
@@ -152,7 +153,8 @@ async def toggle_channel(callback: CallbackQuery):
     channels = await db.get_required_channels()
     ch = next((c for c in channels if c['id'] == channel_db_id), None)
     if ch:
-        status = "включён ✅" if ch.get('is_active', 1) else "выключен ❌"
+        is_on = ch.get('is_active', 1) not in (0, False)
+        status = "включён ✅" if is_on else "выключен ❌"
         await callback.answer(f"{ch['channel_name']} {status}!")
     else:
         await callback.answer("Готово!")

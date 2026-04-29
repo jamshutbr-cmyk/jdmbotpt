@@ -48,10 +48,14 @@ async def cmd_start(message: Message):
     """Команда /start"""
     # Проверяем подписку (если включена)
     enabled_str = await db.get_setting('subscription_enabled') or '0'
+    logger.info(f"User {message.from_user.id} /start, subscription_enabled={enabled_str}")
     if enabled_str == '1' and not await is_admin(message.from_user.id):
         channels = await db.get_required_channels()
-        if channels:
-            not_subscribed = await check_all_subscriptions(bot, message.from_user.id, channels)
+        active_channels = [c for c in channels if c.get('is_active', 1)]
+        logger.info(f"Active channels: {[c['channel_id'] for c in active_channels]}")
+        if active_channels:
+            not_subscribed = await check_all_subscriptions(bot, message.from_user.id, active_channels)
+            logger.info(f"Not subscribed: {[c['channel_id'] for c in not_subscribed]}")
             if not_subscribed:
                 text, keyboard = build_subscribe_message(not_subscribed)
                 await message.answer(text, reply_markup=keyboard)
