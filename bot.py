@@ -17,9 +17,11 @@ from keyboards import (
 )
 from states import AddCarStates, SearchStates
 from utils import is_admin, format_car_info, format_stats
+from subscription_check import check_all_subscriptions, build_subscribe_message
 import admin_handlers
 import support_handlers
 import suggest_handlers
+import subscription_handlers
 
 # Настройка логирования
 logging.basicConfig(level=logging.INFO)
@@ -33,6 +35,7 @@ dp = Dispatcher()
 dp.include_router(admin_handlers.router)
 dp.include_router(support_handlers.router)
 dp.include_router(suggest_handlers.router)
+dp.include_router(subscription_handlers.router)
 
 # Константы
 CARS_PER_PAGE = 6
@@ -43,6 +46,17 @@ CARS_PER_PAGE = 6
 @dp.message(Command("start"))
 async def cmd_start(message: Message):
     """Команда /start"""
+    # Проверяем подписку (если включена)
+    enabled_str = await db.get_setting('subscription_enabled') or '0'
+    if enabled_str == '1' and not await is_admin(message.from_user.id):
+        channels = await db.get_required_channels()
+        if channels:
+            not_subscribed = await check_all_subscriptions(bot, message.from_user.id, channels)
+            if not_subscribed:
+                text, keyboard = build_subscribe_message(not_subscribed)
+                await message.answer(text, reply_markup=keyboard)
+                return
+
     welcome_text = await db.get_setting('welcome_text')
     if not welcome_text:
         welcome_text = (
@@ -50,19 +64,18 @@ async def cmd_start(message: Message):
             "Здесь ты найдешь крутые тачки, сфотографированные на улицах города.\n\n"
             "Выбери действие из меню ниже:"
         )
-    
+
     keyboard = main_menu_kb()
-    
+
     if await is_admin(message.from_user.id):
         builder = InlineKeyboardBuilder()
         for row in keyboard.inline_keyboard:
             builder.row(*row)
         builder.row(InlineKeyboardButton(text="⚙️ Админ-панель", callback_data="admin_panel"))
         keyboard = builder.as_markup()
-    
-    # Проверяем, есть ли фото приветствия
+
     welcome_photo = await db.get_setting('welcome_photo')
-    
+
     if welcome_photo:
         await message.answer_photo(
             photo=welcome_photo,

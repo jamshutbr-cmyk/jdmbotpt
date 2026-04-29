@@ -54,6 +54,18 @@ class Database:
                     value TEXT
                 )
             ''')
+
+            # Таблица каналов для обязательной подписки
+            await db.execute('''
+                CREATE TABLE IF NOT EXISTS required_channels (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    channel_id TEXT NOT NULL UNIQUE,
+                    channel_url TEXT NOT NULL,
+                    channel_name TEXT NOT NULL,
+                    is_active INTEGER DEFAULT 1,
+                    added_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                )
+            ''')
             
             # Таблица тикетов поддержки
             await db.execute('''
@@ -404,6 +416,41 @@ class Database:
             )
             rows = await cursor.fetchall()
             return [dict(r) for r in rows]
+
+    # ============= КАНАЛЫ =============
+
+    async def get_required_channels(self) -> List[Dict]:
+        async with aiosqlite.connect(self.db_path) as db:
+            db.row_factory = aiosqlite.Row
+            cursor = await db.execute('SELECT * FROM required_channels ORDER BY added_at ASC')
+            rows = await cursor.fetchall()
+            return [dict(r) for r in rows]
+
+    async def add_required_channel(self, channel_id: str, channel_url: str, channel_name: str) -> bool:
+        async with aiosqlite.connect(self.db_path) as db:
+            try:
+                await db.execute('''
+                    INSERT INTO required_channels (channel_id, channel_url, channel_name)
+                    VALUES (?, ?, ?)
+                ''', (channel_id, channel_url, channel_name))
+                await db.commit()
+                return True
+            except:
+                return False
+
+    async def remove_required_channel(self, channel_id: int):
+        async with aiosqlite.connect(self.db_path) as db:
+            await db.execute('DELETE FROM required_channels WHERE id = ?', (channel_id,))
+            await db.commit()
+
+    async def toggle_required_channel(self, channel_id: int):
+        """Переключить активность канала"""
+        async with aiosqlite.connect(self.db_path) as db:
+            await db.execute('''
+                UPDATE required_channels SET is_active = CASE WHEN is_active = 1 THEN 0 ELSE 1 END
+                WHERE id = ?
+            ''', (channel_id,))
+            await db.commit()
 
 
 db = Database()

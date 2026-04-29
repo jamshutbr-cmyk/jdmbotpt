@@ -62,6 +62,9 @@ def settings_menu_kb() -> InlineKeyboardMarkup:
         InlineKeyboardButton(text="👥 Управление админами", callback_data="manage_admins")
     )
     builder.row(
+        InlineKeyboardButton(text="📢 Обязательная подписка", callback_data="subscription_settings")
+    )
+    builder.row(
         InlineKeyboardButton(text="🔄 Сбросить всё", callback_data="settings_reset")
     )
     builder.row(

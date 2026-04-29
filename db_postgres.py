@@ -60,8 +60,18 @@ class PostgresDatabase:
                     value TEXT
                 )
             ''')
-            
-            # Таблица тикетов поддержки
+
+            # Таблица каналов для обязательной подписки
+            await conn.execute('''
+                CREATE TABLE IF NOT EXISTS required_channels (
+                    id SERIAL PRIMARY KEY,
+                    channel_id TEXT NOT NULL UNIQUE,
+                    channel_url TEXT NOT NULL,
+                    channel_name TEXT NOT NULL,
+                    is_active INTEGER DEFAULT 1,
+                    added_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                )
+            ''')
             await conn.execute('''
                 CREATE TABLE IF NOT EXISTS tickets (
                     id SERIAL PRIMARY KEY,
@@ -363,6 +373,36 @@ class PostgresDatabase:
             await conn.execute('''
                 UPDATE car_suggestions SET status = $1, reject_reason = $2 WHERE id = $3
             ''', status, reason, suggestion_id)
+
+    # ============= КАНАЛЫ =============
+
+    async def get_required_channels(self) -> List[Dict]:
+        async with self.pool.acquire() as conn:
+            rows = await conn.fetch('SELECT * FROM required_channels ORDER BY added_at ASC')
+            return [dict(r) for r in rows]
+
+    async def add_required_channel(self, channel_id: str, channel_url: str, channel_name: str) -> bool:
+        async with self.pool.acquire() as conn:
+            try:
+                await conn.execute('''
+                    INSERT INTO required_channels (channel_id, channel_url, channel_name)
+                    VALUES ($1, $2, $3)
+                ''', channel_id, channel_url, channel_name)
+                return True
+            except:
+                return False
+
+    async def remove_required_channel(self, channel_id: int):
+        async with self.pool.acquire() as conn:
+            await conn.execute('DELETE FROM required_channels WHERE id = $1', channel_id)
+
+    async def toggle_required_channel(self, channel_id: int):
+        """Переключить активность канала"""
+        async with self.pool.acquire() as conn:
+            await conn.execute('''
+                UPDATE required_channels SET is_active = CASE WHEN is_active = 1 THEN 0 ELSE 1 END
+                WHERE id = $1
+            ''', channel_id)
 
     async def close(self):
         if self.pool:
