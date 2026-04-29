@@ -1,7 +1,5 @@
-"""
-Система проверки подписки на каналы.
-"""
 import logging
+import time
 from aiogram import Bot
 from aiogram.enums import ChatMemberStatus
 from aiogram.utils.keyboard import InlineKeyboardBuilder
@@ -9,29 +7,68 @@ from aiogram.types import InlineKeyboardButton
 
 logger = logging.getLogger(__name__)
 
+# Кэш результатов проверки: {(user_id, channel_id): (result, timestamp)}
+_cache: dict = {}
+CACHE_TTL = 30  # секунд
+
 
 async def is_subscribed(bot: Bot, user_id: int, channel_id: str) -> bool:
-    """Проверить подписан ли пользователь на канал"""
+    """Проверить подписан ли пользователь на канал (с кэшем)"""
+    cache_key = (user_id, channel_id)
+    now = time.time()
+
+    # Проверяем кэш
+    if cache_key in _cache:
+        result, ts = _cache[cache_key]
+        if now - ts < CACHE_TTL:
+            logger.info(f"Cache hit: user {user_id} in {channel_id} = {result}")
+            return result
+
     try:
         member = await bot.get_chat_member(chat_id=channel_id, user_id=user_id)
         logger.info(f"User {user_id} in channel {channel_id}: status={member.status}")
-        return member.status not in [
+        result = member.status not in [
             ChatMemberStatus.LEFT,
             ChatMemberStatus.KICKED,
             ChatMemberStatus.BANNED,
         ]
+        # Сохраняем в кэш
+        _cache[cache_key] = (result, now)
+        return result
+
     except Exception as e:
         err = str(e).upper()
         logger.warning(f"get_chat_member error for user {user_id} in {channel_id}: {e}")
 
         if 'CHAT_NOT_FOUND' in err or 'BOT IS NOT A MEMBER' in err:
             logger.error(f"Bot is not in channel {channel_id}!")
-            return True  # бот не в канале — пропускаем
+            _cache[cache_key] = (True, now)
+            return True
 
-        # BANNED/BLOCKED — пользователь заблокировал бота в личке
-        # Это НЕ означает что он не подписан на канал
-        # Но мы уже не можем проверить — считаем НЕ подписан (строгая проверка)
+        # Если в кэше есть старый результат — используем его
+        if cache_key in _cache:
+            old_result, _ = _cache[cache_key]
+            logger.info(f"Using stale cache for user {user_id}: {old_result}")
+            _cache[cache_key] = (old_result, now)  # обновляем время
+            return old_result
+
+        # Нет кэша и ошибка — не пускаем
+        _cache[cache_key] = (False, now)
         return False
+
+
+def invalidate_cache(user_id: int = None, channel_id: str = None):
+    """Сбросить кэш для пользователя или канала"""
+    global _cache
+    if user_id is None and channel_id is None:
+        _cache = {}
+        return
+    keys_to_delete = [
+        k for k in _cache
+        if (user_id and k[0] == user_id) or (channel_id and k[1] == channel_id)
+    ]
+    for k in keys_to_delete:
+        del _cache[k]
 
 
 async def check_all_subscriptions(bot: Bot, user_id: int, channels: list) -> list:
@@ -41,7 +78,6 @@ async def check_all_subscriptions(bot: Bot, user_id: int, channels: list) -> lis
     """
     not_subscribed = []
     for channel in channels:
-        # is_active может быть int (1/0) или bool (True/False) в зависимости от БД
         is_active = channel.get('is_active', 1)
         if is_active in (0, False):
             continue
@@ -52,10 +88,7 @@ async def check_all_subscriptions(bot: Bot, user_id: int, channels: list) -> lis
 
 
 def build_subscribe_message(not_subscribed: list) -> tuple:
-    """
-    Создать сообщение одписки.и клавиатуру для п
-    Возвращает (text, keyboard)
-    """
+    """Создать сообщение и клавиатуру для подписки"""
     text = (
         "🔒 <b>Доступ ограничен</b>\n\n"
         "Для использования бота необходимо подписаться на наши каналы:\n\n"

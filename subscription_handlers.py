@@ -368,6 +368,10 @@ async def check_subscription_callback(callback: CallbackQuery, bot: Bot):
         await callback.answer()
         return
 
+    # Сбрасываем кэш чтобы получить свежий статус
+    from subscription_check import invalidate_cache
+    invalidate_cache(user_id=callback.from_user.id)
+
     channels = await db.get_required_channels()
     not_subscribed = await check_all_subscriptions(bot, callback.from_user.id, channels)
 
