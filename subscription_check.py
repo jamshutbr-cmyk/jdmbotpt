@@ -7,114 +7,108 @@ from aiogram.types import InlineKeyboardButton
 
 logger = logging.getLogger(__name__)
 
-# Кэш результатов проверки: {(user_id, channel_id): (result, timestamp)}
-_cache: dict = {}
+# {(user_id, channel_id): (result, timestamp)}
+_cache = {}
 CACHE_TTL = 30  # секунд
 
 
-async def is_subscribed(bot: Bot, user_id: int, channel_id: str) -> bool:
-    """Проверить подписан ли пользователь на канал (с кэшем)"""
-    cache_key = (user_id, channel_id)
-    now = time.time()
-
-    # Проверяем кэш
-    if cache_key in _cache:
-        result, ts = _cache[cache_key]
-        if now - ts < CACHE_TTL:
-            logger.info(f"Cache hit: user {user_id} in {channel_id} = {result}")
+def _get_cache(user_id: int, channel_id: str):
+    key = (user_id, channel_id)
+    if key in _cache:
+        result, ts = _cache[key]
+        if time.time() - ts < CACHE_TTL:
+            logger.info(f"[CACHE HIT] {user_id} -> {channel_id} = {result}")
             return result
+    return None
+
+
+def _set_cache(user_id: int, channel_id: str, result: bool):
+    _cache[(user_id, channel_id)] = (result, time.time())
+
+
+async def is_subscribed(bot: Bot, user_id: int, channel_id: str) -> bool:
+    """Проверка подписки (без ложных срабатываний)"""
+    cached = _get_cache(user_id, channel_id)
+    if cached is not None:
+        return cached
 
     try:
         member = await bot.get_chat_member(chat_id=channel_id, user_id=user_id)
-        logger.info(f"User {user_id} in channel {channel_id}: status={member.status}")
-        result = member.status not in [
-            ChatMemberStatus.LEFT,
-            ChatMemberStatus.KICKED,
-            ChatMemberStatus.BANNED,
-        ]
-        # Сохраняем в кэш только если результат True, или кэша нет
-        if result or cache_key not in _cache:
-            _cache[cache_key] = (result, now)
+        logger.info(f"[CHECK] user={user_id} channel={channel_id} status={member.status}")
+
+        result = member.status in (
+            ChatMemberStatus.MEMBER,
+            ChatMemberStatus.ADMINISTRATOR,
+            ChatMemberStatus.CREATOR,
+        )
+        _set_cache(user_id, channel_id, result)
         return result
 
     except Exception as e:
         err = str(e).upper()
-        logger.warning(f"get_chat_member error for user {user_id} in {channel_id}: {e}")
+        logger.warning(f"[ERROR] get_chat_member: {e}")
 
-        if 'CHAT_NOT_FOUND' in err or 'BOT IS NOT A MEMBER' in err:
-            logger.error(f"Bot is not in channel {channel_id}!")
-            _cache[cache_key] = (True, now)
-            return True
+        if "BOT IS NOT A MEMBER" in err or "CHAT_NOT_FOUND" in err:
+            logger.error(f"[CRITICAL] Bot not in channel {channel_id}")
+            return True  # пропускаем
 
-        # Если в кэше есть результат True — доверяем ему
-        if cache_key in _cache:
-            old_result, _ = _cache[cache_key]
-            logger.info(f"Using cache for user {user_id}: {old_result}")
-            return old_result
-
-        _cache[cache_key] = (False, now)
+        # НЕ кэшируем False при ошибке
         return False
 
 
 def invalidate_cache(user_id: int = None, channel_id: str = None):
-    """Сбросить кэш для пользователя или канала"""
+    """Сброс кэша"""
     global _cache
     if user_id is None and channel_id is None:
         _cache = {}
         return
-    keys_to_delete = [
-        k for k in _cache
-        if (user_id and k[0] == user_id) or (channel_id and k[1] == channel_id)
-    ]
-    for k in keys_to_delete:
-        del _cache[k]
+    _cache = {
+        k: v for k, v in _cache.items()
+        if not (
+            (user_id and k[0] == user_id) or
+            (channel_id and k[1] == channel_id)
+        )
+    }
 
 
 async def check_all_subscriptions(bot: Bot, user_id: int, channels: list) -> list:
-    """
-    Проверить подписку на все АКТИВНЫЕ каналы.
-    Возвращает список каналов на которые НЕ подписан.
-    """
+    """Вернёт список каналов, на которые пользователь НЕ подписан"""
     not_subscribed = []
-    seen_channel_ids = set()  # защита от дубликатов
+    seen = set()
 
     for channel in channels:
-        is_active = channel.get('is_active', 1)
-        if is_active in (0, False):
+        if not channel.get("is_active", 1):
             continue
 
-        channel_id = channel['channel_id']
-        if channel_id in seen_channel_ids:
-            continue  # пропускаем дубликат
-        seen_channel_ids.add(channel_id)
+        channel_id = channel["channel_id"]
+        if channel_id in seen:
+            continue
+        seen.add(channel_id)
 
-        subscribed = await is_subscribed(bot, user_id, channel_id)
-        if not subscribed:
+        if not await is_subscribed(bot, user_id, channel_id):
             not_subscribed.append(channel)
 
     return not_subscribed
 
 
-def build_subscribe_message(not_subscribed: list) -> tuple:
-    """Создать сообщение и клавиатуру для подписки"""
+def build_subscribe_message(not_subscribed: list):
+    """Сообщение + кнопки"""
     text = (
         "🔒 <b>Доступ ограничен</b>\n\n"
-        "Для использования бота необходимо подписаться на наши каналы:\n\n"
+        "Подпишись на каналы ниже, чтобы пользоваться ботом:\n\n"
     )
-
     builder = InlineKeyboardBuilder()
 
     for i, channel in enumerate(not_subscribed, 1):
         text += f"{i}. <b>{channel['channel_name']}</b>\n"
         builder.row(InlineKeyboardButton(
             text=f"📢 {channel['channel_name']}",
-            url=channel['channel_url']
+            url=channel["channel_url"]
         ))
 
     text += "\nПосле подписки нажми кнопку ниже 👇"
-
     builder.row(InlineKeyboardButton(
-        text="✅ Я подписался!",
+        text="✅ Я подписался",
         callback_data="check_subscription"
     ))
 
