@@ -112,7 +112,16 @@ class Database:
                 )
             ''')
             
-            # Добавляем дефолтные настройки
+            # Таблица пользователей (для рассылки и настроек)
+            await db.execute('''
+                CREATE TABLE IF NOT EXISTS users (
+                    user_id INTEGER PRIMARY KEY,
+                    username TEXT,
+                    first_name TEXT,
+                    show_username INTEGER DEFAULT 1,
+                    last_seen TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                )
+            ''')
             await db.execute('''
                 INSERT OR IGNORE INTO settings (key, value) 
                 VALUES ('welcome_text', '🚗 <b>Добро пожаловать в JDM Cars Bot!</b>\n\nЗдесь ты найдешь крутые тачки, сфотографированные на улицах города.\n\nВыбери действие из меню ниже:')
@@ -416,6 +425,56 @@ class Database:
             )
             rows = await cursor.fetchall()
             return [dict(r) for r in rows]
+
+    # ============= ПОЛЬЗОВАТЕЛИ =============
+
+    async def register_user(self, user_id: int, username: str, first_name: str):
+        """Зарегистрировать/обновить пользователя"""
+        async with aiosqlite.connect(self.db_path) as db:
+            await db.execute('''
+                INSERT INTO users (user_id, username, first_name)
+                VALUES (?, ?, ?)
+                ON CONFLICT(user_id) DO UPDATE SET
+                    username = excluded.username,
+                    first_name = excluded.first_name,
+                    last_seen = CURRENT_TIMESTAMP
+            ''', (user_id, username, first_name))
+            await db.commit()
+
+    async def get_user(self, user_id: int) -> Optional[Dict]:
+        async with aiosqlite.connect(self.db_path) as db:
+            db.row_factory = aiosqlite.Row
+            cursor = await db.execute('SELECT * FROM users WHERE user_id = ?', (user_id,))
+            row = await cursor.fetchone()
+            return dict(row) if row else None
+
+    async def get_all_users(self) -> List[Dict]:
+        async with aiosqlite.connect(self.db_path) as db:
+            db.row_factory = aiosqlite.Row
+            cursor = await db.execute('SELECT * FROM users')
+            rows = await cursor.fetchall()
+            return [dict(r) for r in rows]
+
+    async def set_show_username(self, user_id: int, value: bool):
+        """Установить настройку отображения ника"""
+        async with aiosqlite.connect(self.db_path) as db:
+            await db.execute('''
+                INSERT INTO users (user_id, show_username)
+                VALUES (?, ?)
+                ON CONFLICT(user_id) DO UPDATE SET show_username = excluded.show_username
+            ''', (user_id, 1 if value else 0))
+            await db.commit()
+
+    async def get_show_username(self, user_id: int) -> bool:
+        """Получить настройку отображения ника"""
+        async with aiosqlite.connect(self.db_path) as db:
+            cursor = await db.execute(
+                'SELECT show_username FROM users WHERE user_id = ?', (user_id,)
+            )
+            row = await cursor.fetchone()
+            if row is None:
+                return True  # по умолчанию показываем
+            return bool(row[0])
 
     # ============= КАНАЛЫ =============
 

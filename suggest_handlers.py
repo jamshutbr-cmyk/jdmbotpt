@@ -380,6 +380,14 @@ async def approve_suggestion(callback: CallbackQuery, bot: Bot):
         photo_id=s['photo_id']
     )
 
+    # Если пользователь разрешил показывать ник — добавляем в описание
+    show_username = await db.get_show_username(s['user_id'])
+    if show_username and s.get('username'):
+        current_desc = s.get('description') or ''
+        author_line = f"\n\n📸 Фото: @{s['username']}"
+        new_desc = current_desc + author_line
+        await db.update_car(car_id, description=new_desc)
+
     # Обновляем статус предложения
     await db.update_suggestion_status(suggestion_id, 'approved')
 

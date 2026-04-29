@@ -3,10 +3,10 @@ from aiogram.utils.keyboard import InlineKeyboardBuilder
 
 
 def main_menu_kb() -> InlineKeyboardMarkup:
-    """Главное меню"""
+    """Главное меню — основные функции"""
     builder = InlineKeyboardBuilder()
     builder.row(
-        InlineKeyboardButton(text="🚗 Каталог машин", callback_data="catalog"),
+        InlineKeyboardButton(text="🚗 Каталог", callback_data="catalog"),
         InlineKeyboardButton(text="🔍 Поиск", callback_data="search")
     )
     builder.row(
@@ -17,11 +17,24 @@ def main_menu_kb() -> InlineKeyboardMarkup:
         InlineKeyboardButton(text="📸 Предложить машину", callback_data="suggest_menu")
     )
     builder.row(
-        InlineKeyboardButton(text="📊 Статистика", callback_data="stats"),
-        InlineKeyboardButton(text="🆘 Поддержка", callback_data="support_menu")
+        InlineKeyboardButton(text="☰ Ещё", callback_data="more_menu")
+    )
+    return builder.as_markup()
+
+
+def more_menu_kb() -> InlineKeyboardMarkup:
+    """Вспомогательное меню"""
+    builder = InlineKeyboardBuilder()
+    builder.row(
+        InlineKeyboardButton(text="🆘 Поддержка", callback_data="support_menu"),
+        InlineKeyboardButton(text="📊 Статистика", callback_data="stats")
     )
     builder.row(
+        InlineKeyboardButton(text="⚙️ Настройки", callback_data="user_settings"),
         InlineKeyboardButton(text="ℹ️ О боте", callback_data="about")
+    )
+    builder.row(
+        InlineKeyboardButton(text="🔙 Назад", callback_data="back_to_main")
     )
     return builder.as_markup()
 
@@ -36,6 +49,9 @@ def admin_menu_kb() -> InlineKeyboardMarkup:
     builder.row(
         InlineKeyboardButton(text="🎫 Тикеты", callback_data="admin_tickets"),
         InlineKeyboardButton(text="📸 Предложения", callback_data="admin_suggestions")
+    )
+    builder.row(
+        InlineKeyboardButton(text="📢 Рассылка", callback_data="admin_broadcast")
     )
     builder.row(
         InlineKeyboardButton(text="⚙️ Настройки", callback_data="admin_settings")
@@ -187,5 +203,14 @@ def back_to_main_kb() -> InlineKeyboardMarkup:
     builder = InlineKeyboardBuilder()
     builder.row(
         InlineKeyboardButton(text="🔙 Главное меню", callback_data="back_to_main")
+    )
+    return builder.as_markup()
+
+
+def back_to_more_kb() -> InlineKeyboardMarkup:
+    """Кнопка возврата в меню 'Ещё'"""
+    builder = InlineKeyboardBuilder()
+    builder.row(
+        InlineKeyboardButton(text="🔙 Назад", callback_data="more_menu")
     )
     return builder.as_markup()

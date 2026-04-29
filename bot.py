@@ -12,8 +12,8 @@ from aiogram.types import InlineKeyboardButton
 from config import BOT_TOKEN
 from db_adapter import db
 from keyboards import (
-    main_menu_kb, admin_menu_kb, car_navigation_kb, catalog_kb,
-    confirm_delete_kb, cancel_kb, back_to_main_kb, search_results_kb
+    main_menu_kb, more_menu_kb, admin_menu_kb, car_navigation_kb, catalog_kb,
+    confirm_delete_kb, cancel_kb, back_to_main_kb, back_to_more_kb, search_results_kb
 )
 from states import AddCarStates, SearchStates
 from utils import is_admin, format_car_info, format_stats
@@ -22,6 +22,7 @@ import admin_handlers
 import support_handlers
 import suggest_handlers
 import subscription_handlers
+import user_settings_handlers
 
 # Настройка логирования
 logging.basicConfig(level=logging.INFO)
@@ -36,6 +37,7 @@ dp.include_router(admin_handlers.router)
 dp.include_router(support_handlers.router)
 dp.include_router(suggest_handlers.router)
 dp.include_router(subscription_handlers.router)
+dp.include_router(user_settings_handlers.router)
 
 # Middleware для проверки подписки при каждом действии
 dp.message.middleware(SubscriptionMiddleware())
@@ -50,6 +52,13 @@ CARS_PER_PAGE = 6
 @dp.message(Command("start"))
 async def cmd_start(message: Message):
     """Команда /start"""
+    # Регистрируем пользователя
+    await db.register_user(
+        message.from_user.id,
+        message.from_user.username or '',
+        message.from_user.first_name or ''
+    )
+
     welcome_text = await db.get_setting('welcome_text')
     if not welcome_text:
         welcome_text = (
@@ -102,29 +111,40 @@ async def cmd_help(message: Message):
 async def back_to_main(callback: CallbackQuery, state: FSMContext):
     """Возврат в главное меню"""
     await state.clear()
-    
+
     bot_name = await db.get_setting('bot_name') or 'JDM Cars Bot'
     welcome_text = f"🚗 <b>{bot_name}</b>\n\nВыбери действие из меню:"
-    
+
     keyboard = main_menu_kb()
-    
+
     if await is_admin(callback.from_user.id):
         builder = InlineKeyboardBuilder()
         for row in keyboard.inline_keyboard:
             builder.row(*row)
         builder.row(InlineKeyboardButton(text="⚙️ Админ-панель", callback_data="admin_panel"))
         keyboard = builder.as_markup()
-    
+
     try:
         await callback.message.edit_text(welcome_text, reply_markup=keyboard)
     except:
         await callback.message.delete()
         await callback.message.answer(welcome_text, reply_markup=keyboard)
-    
+
     await callback.answer()
 
 
-@dp.callback_query(F.data == "about")
+@dp.callback_query(F.data == "more_menu")
+async def more_menu(callback: CallbackQuery):
+    """Вспомогательное меню"""
+    bot_name = await db.get_setting('bot_name') or 'JDM Cars Bot'
+    text = f"☰ <b>{bot_name}</b>\n\nДополнительные функции:"
+
+    try:
+        await callback.message.edit_text(text, reply_markup=more_menu_kb())
+    except:
+        await callback.message.delete()
+        await callback.message.answer(text, reply_markup=more_menu_kb())
+    await callback.answer()
 async def about_bot(callback: CallbackQuery):
     """О боте"""
     bot_name = await db.get_setting('bot_name') or 'JDM Cars Bot'
@@ -141,10 +161,10 @@ async def about_bot(callback: CallbackQuery):
         f"<i>Создано <a href='https://t.me/pr0stoy4elovek'>@pr0stoy4elovek</a></i>"
     )
     try:
-        await callback.message.edit_text(about_text, reply_markup=back_to_main_kb(), disable_web_page_preview=True)
+        await callback.message.edit_text(about_text, reply_markup=back_to_more_kb(), disable_web_page_preview=True)
     except:
         await callback.message.delete()
-        await callback.message.answer(about_text, reply_markup=back_to_main_kb(), disable_web_page_preview=True)
+        await callback.message.answer(about_text, reply_markup=back_to_more_kb(), disable_web_page_preview=True)
     await callback.answer()
 
 
@@ -462,13 +482,16 @@ async def show_stats(callback: CallbackQuery):
     """Показать статистику"""
     stats = await db.get_stats()
     text = format_stats(stats)
-    
+
+    builder = InlineKeyboardBuilder()
+    builder.row(InlineKeyboardButton(text="🔙 Назад", callback_data="more_menu"))
+
     try:
-        await callback.message.edit_text(text, reply_markup=back_to_main_kb())
+        await callback.message.edit_text(text, reply_markup=builder.as_markup())
     except:
         await callback.message.delete()
-        await callback.message.answer(text, reply_markup=back_to_main_kb())
-    
+        await callback.message.answer(text, reply_markup=builder.as_markup())
+
     await callback.answer()
 
 

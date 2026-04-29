@@ -61,7 +61,16 @@ class PostgresDatabase:
                 )
             ''')
 
-            # Таблица каналов для обязательной подписки
+            # Таблица пользователей
+            await conn.execute('''
+                CREATE TABLE IF NOT EXISTS users (
+                    user_id BIGINT PRIMARY KEY,
+                    username TEXT,
+                    first_name TEXT,
+                    show_username INTEGER DEFAULT 1,
+                    last_seen TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                )
+            ''')
             await conn.execute('''
                 CREATE TABLE IF NOT EXISTS required_channels (
                     id SERIAL PRIMARY KEY,
@@ -367,6 +376,46 @@ class PostgresDatabase:
                 user_id
             )
             return [dict(r) for r in rows]
+
+    # ============= ПОЛЬЗОВАТЕЛИ =============
+
+    async def register_user(self, user_id: int, username: str, first_name: str):
+        async with self.pool.acquire() as conn:
+            await conn.execute('''
+                INSERT INTO users (user_id, username, first_name)
+                VALUES ($1, $2, $3)
+                ON CONFLICT(user_id) DO UPDATE SET
+                    username = EXCLUDED.username,
+                    first_name = EXCLUDED.first_name,
+                    last_seen = NOW()
+            ''', user_id, username, first_name)
+
+    async def get_user(self, user_id: int) -> Optional[Dict]:
+        async with self.pool.acquire() as conn:
+            row = await conn.fetchrow('SELECT * FROM users WHERE user_id = $1', user_id)
+            return dict(row) if row else None
+
+    async def get_all_users(self) -> List[Dict]:
+        async with self.pool.acquire() as conn:
+            rows = await conn.fetch('SELECT * FROM users')
+            return [dict(r) for r in rows]
+
+    async def set_show_username(self, user_id: int, value: bool):
+        async with self.pool.acquire() as conn:
+            await conn.execute('''
+                INSERT INTO users (user_id, show_username)
+                VALUES ($1, $2)
+                ON CONFLICT(user_id) DO UPDATE SET show_username = EXCLUDED.show_username
+            ''', user_id, 1 if value else 0)
+
+    async def get_show_username(self, user_id: int) -> bool:
+        async with self.pool.acquire() as conn:
+            row = await conn.fetchrow(
+                'SELECT show_username FROM users WHERE user_id = $1', user_id
+            )
+            if row is None:
+                return True
+            return bool(row['show_username'])
 
     async def update_suggestion_status(self, suggestion_id: int, status: str, reason: str = None):
         async with self.pool.acquire() as conn:
