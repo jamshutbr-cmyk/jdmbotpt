@@ -1,6 +1,3 @@
-"""
-Обработчики для управления системой подписки.
-"""
 from aiogram import F, Router, Bot
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import StatesGroup, State
@@ -20,35 +17,16 @@ class AddChannelStates(StatesGroup):
     waiting_for_channel_name = State()
 
 
-def subscription_settings_kb(enabled: bool) -> object:
+def subscription_settings_kb(enabled: bool):
     builder = InlineKeyboardBuilder()
     status = "✅ Включена" if enabled else "❌ Выключена"
     toggle_text = "🔴 Выключить" if enabled else "🟢 Включить"
-
-    builder.row(InlineKeyboardButton(
-        text=f"Статус: {status}",
-        callback_data="sub_status_info"
-    ))
-    builder.row(InlineKeyboardButton(
-        text=toggle_text,
-        callback_data="sub_toggle"
-    ))
-    builder.row(InlineKeyboardButton(
-        text="➕ Добавитon"
-    ))
-    builder.row(InlineKeyboardButton(
-        text="🔙 Настройки",ь канал",
-        callback_data="sub_add_channel"
-    ))
-    builder.row(InlineKeyboardButton(
-        text="📋 Список каналов",
-        callback_data="sub_list_channels"
-    ))
-    builder.row(InlineKeyboardButton(
-        text="ℹ️ Инструкция",
-        callback_data="sub_instructi
-        callback_data="admin_settings"
-    ))
+    builder.row(InlineKeyboardButton(text=f"Статус: {status}", callback_data="sub_status_info"))
+    builder.row(InlineKeyboardButton(text=toggle_text, callback_data="sub_toggle"))
+    builder.row(InlineKeyboardButton(text="➕ Добавить канал", callback_data="sub_add_channel"))
+    builder.row(InlineKeyboardButton(text="📋 Список каналов", callback_data="sub_list_channels"))
+    builder.row(InlineKeyboardButton(text="ℹ️ Инструкция", callback_data="sub_instruction"))
+    builder.row(InlineKeyboardButton(text="🔙 Настройки", callback_data="admin_settings"))
     return builder.as_markup()
 
 
@@ -68,8 +46,7 @@ async def subscription_settings(callback: CallbackQuery):
         "📢 <b>Система обязательной подписки</b>\n\n"
         f"Статус: {'✅ Включена' if enabled else '❌ Выключена'}\n"
         f"Каналов в списке: {len(channels)}\n\n"
-        "Когда включена — пользователи должны подписаться на все каналы из списка, "
-        "чтобы пользоваться ботом."
+        "Когда включена — пользователи должны подписаться на все активные каналы."
     )
 
     try:
@@ -91,22 +68,24 @@ async def toggle_subscription(callback: CallbackQuery):
     enabled_str = await db.get_setting('subscription_enabled') or '0'
     enabled = enabled_str == '1'
     new_state = '0' if enabled else '1'
-    await db.set_setting('subscription_enabled', new_state)
 
     if new_state == '1':
         channels = await db.get_required_channels()
-        if not channels:
-            await db.set_setting('subscription_enabled', '0')
-            await callback.answer(
-                "⚠️ Сначала добавь хотя бы один канал!",
-                show_alert=True
-            )
+        active = [c for c in channels if c.get('is_active', 1)]
+        if not active:
+            await callback.answer("⚠️ Сначала добавь хотя бы один активный канал!", show_alert=True)
             return
         await callback.answer("✅ Проверка подписки включена!")
     else:
         await callback.answer("❌ Проверка подписки выключена!")
 
+    await db.set_setting('subscription_enabled', new_state)
     await subscription_settings(callback)
+
+
+@router.callback_query(F.data == "sub_status_info")
+async def sub_status_info(callback: CallbackQuery):
+    await callback.answer()
 
 
 # ============= СПИСОК КАНАЛОВ =============
@@ -123,18 +102,11 @@ async def list_channels(callback: CallbackQuery):
         builder = InlineKeyboardBuilder()
         builder.row(InlineKeyboardButton(text="➕ Добавить канал", callback_data="sub_add_channel"))
         builder.row(InlineKeyboardButton(text="🔙 Назад", callback_data="subscription_settings"))
-
         try:
-            await callback.message.edit_text(
-                "📋 <b>Список каналов</b>\n\nКаналов пока нет.",
-                reply_markup=builder.as_markup()
-            )
+            await callback.message.edit_text("📋 <b>Список каналов</b>\n\nКаналов пока нет.", reply_markup=builder.as_markup())
         except:
             await callback.message.delete()
-            await callback.message.answer(
-                "📋 <b>Список каналов</b>\n\nКаналов пока нет.",
-                reply_markup=builder.as_markup()
-            )
+            await callback.message.answer("📋 <b>Список каналов</b>\n\nКаналов пока нет.", reply_markup=builder.as_markup())
         await callback.answer()
         return
 
@@ -145,23 +117,11 @@ async def list_channels(callback: CallbackQuery):
         active = ch.get('is_active', 1)
         status_emoji = "✅" if active else "❌"
         toggle_text = "🔴 Выкл" if active else "🟢 Вкл"
-
-        text += f"{status_emoji} <b>{ch['channel_name']}</b>\n"
-        text += f"   ID: <code>{ch['channel_id']}</code>\n\n"
-
+        text += f"{status_emoji} <b>{ch['channel_name']}</b>\n   ID: <code>{ch['channel_id']}</code>\n\n"
         builder.row(
-            InlineKeyboardButton(
-                text=f"{status_emoji} {ch['channel_name']}",
-                callback_data="sub_noop"
-            ),
-            InlineKeyboardButton(
-                text=toggle_text,
-                callback_data=f"sub_toggle_ch_{ch['id']}"
-            ),
-            InlineKeyboardButton(
-                text="🗑",
-                callback_data=f"sub_remove_{ch['id']}"
-            )
+            InlineKeyboardButton(text=f"{status_emoji} {ch['channel_name']}", callback_data="sub_noop"),
+            InlineKeyboardButton(text=toggle_text, callback_data=f"sub_toggle_ch_{ch['id']}"),
+            InlineKeyboardButton(text="🗑", callback_data=f"sub_remove_{ch['id']}")
         )
 
     builder.row(InlineKeyboardButton(text="➕ Добавить канал", callback_data="sub_add_channel"))
@@ -177,13 +137,11 @@ async def list_channels(callback: CallbackQuery):
 
 @router.callback_query(F.data == "sub_noop")
 async def sub_noop(callback: CallbackQuery):
-    """Заглушка для информационных кнопок"""
     await callback.answer()
 
 
 @router.callback_query(F.data.startswith("sub_toggle_ch_"))
 async def toggle_channel(callback: CallbackQuery):
-    """Включить/выключить конкретный канал"""
     if not await is_admin(callback.from_user.id):
         await callback.answer("❌ Нет доступа", show_alert=True)
         return
@@ -193,12 +151,11 @@ async def toggle_channel(callback: CallbackQuery):
 
     channels = await db.get_required_channels()
     ch = next((c for c in channels if c['id'] == channel_db_id), None)
-
     if ch:
-        status = "✅ включён" if ch.get('is_active', 1) else "❌ выключен"
-        await callback.answer(f"Канал {ch['channel_name']} {status}!")
+        status = "включён ✅" if ch.get('is_active', 1) else "выключен ❌"
+        await callback.answer(f"{ch['channel_name']} {status}!")
     else:
-        await callback.answer("✅ Готово!")
+        await callback.answer("Готово!")
 
     await list_channels(callback)
 
@@ -215,7 +172,6 @@ async def remove_channel(callback: CallbackQuery):
     await db.remove_required_channel(channel_db_id)
     await callback.answer("✅ Канал удалён!")
 
-    # Если каналов не осталось — выключаем подписку
     channels = await db.get_required_channels()
     if not channels:
         await db.set_setting('subscription_enabled', '0')
@@ -237,10 +193,10 @@ async def add_channel_start(callback: CallbackQuery, state: FSMContext):
     text = (
         "➕ <b>Добавление канала</b>\n\n"
         "Шаг 1/3: Введи ID канала\n\n"
-        "Как получить ID канала:\n"
-        "1. Добавь бота @userinfobot в канал\n"
+        "Как получить ID:\n"
+        "1. Добавь @userinfobot в канал\n"
         "2. Перешли любое сообщение из канала боту\n"
-        "3. Скопируй ID (начинается с -100)\n\n"
+        "3. Скопируй Chat ID\n\n"
         "Пример: <code>-1001234567890</code>"
     )
 
@@ -258,11 +214,10 @@ async def add_channel_start(callback: CallbackQuery, state: FSMContext):
 async def process_channel_id(message: Message, state: FSMContext):
     channel_id = message.text.strip()
 
-    # Валидация ID
     if not (channel_id.startswith('-100') and channel_id[1:].isdigit()):
         await message.answer(
             "❌ Неверный формат ID.\n\n"
-            "ID канала должен начинаться с <code>-100</code>\n"
+            "ID должен начинаться с <code>-100</code>\n"
             "Пример: <code>-1001234567890</code>"
         )
         return
@@ -288,8 +243,7 @@ async def process_channel_url(message: Message, state: FSMContext):
     if not url.startswith('https://t.me/'):
         await message.answer(
             "❌ Неверный формат ссылки.\n\n"
-            "Ссылка должна начинаться с <code>https://t.me/</code>\n"
-            "Пример: <code>https://t.me/your_channel</code>"
+            "Ссылка должна начинаться с <code>https://t.me/</code>"
         )
         return
 
@@ -301,7 +255,6 @@ async def process_channel_url(message: Message, state: FSMContext):
     await message.answer(
         f"✅ Ссылка: {url}\n\n"
         "Шаг 3/3: Введи название канала\n\n"
-        "Это название будет показываться пользователям.\n"
         "Пример: <code>Тачки Симферополя</code>",
         reply_markup=builder.as_markup()
     )
@@ -322,19 +275,19 @@ async def process_channel_name(message: Message, state: FSMContext, bot: Bot):
 
     # Проверяем что бот есть в канале
     try:
-        chat = await bot.get_chat(channel_id)
-        bot_member = await bot.get_chat_member(channel_id, (await bot.get_me()).id)
+        bot_me = await bot.get_me()
+        bot_member = await bot.get_chat_member(channel_id, bot_me.id)
         if bot_member.status not in ['administrator', 'creator']:
             await message.answer(
                 "⚠️ <b>Внимание!</b>\n\n"
                 "Бот не является администратором этого канала.\n"
-                "Добавь бота как администратора, иначе проверка подписки не будет работать!\n\n"
-                "Канал всё равно добавлен, но не забудь это исправить."
+                "Добавь бота как администратора, иначе проверка не будет работать!\n\n"
+                "Канал всё равно добавлен."
             )
-    except Exception as e:
+    except:
         await message.answer(
             "⚠️ <b>Внимание!</b>\n\n"
-            f"Не удалось проверить доступ бота к каналу.\n"
+            "Не удалось проверить доступ бота к каналу.\n"
             "Убедись что бот добавлен в канал как администратор!"
         )
 
@@ -344,22 +297,18 @@ async def process_channel_name(message: Message, state: FSMContext, bot: Bot):
     if result:
         builder = InlineKeyboardBuilder()
         builder.row(InlineKeyboardButton(text="📋 Список каналов", callback_data="sub_list_channels"))
-        builder.row(InlineKeyboardButton(text="🔙 К настройкам подписки", callback_data="subscription_settings"))
-
+        builder.row(InlineKeyboardButton(text="🔙 К настройкам", callback_data="subscription_settings"))
         await message.answer(
             f"✅ <b>Канал добавлен!</b>\n\n"
-            f"📢 Название: <b>{name}</b>\n"
-            f"🆔 ID: <code>{channel_id}</code>\n"
-            f"🔗 URL: {channel_url}",
+            f"📢 {name}\n"
+            f"🆔 <code>{channel_id}</code>\n"
+            f"🔗 {channel_url}",
             reply_markup=builder.as_markup()
         )
     else:
-        await message.answer(
-            "❌ Этот канал уже добавлен в список.",
-            reply_markup=InlineKeyboardBuilder().row(
-                InlineKeyboardButton(text="🔙 Назад", callback_data="subscription_settings")
-            ).as_markup()
-        )
+        builder = InlineKeyboardBuilder()
+        builder.row(InlineKeyboardButton(text="🔙 Назад", callback_data="subscription_settings"))
+        await message.answer("❌ Этот канал уже добавлен.", reply_markup=builder.as_markup())
 
 
 # ============= ИНСТРУКЦИЯ =============
@@ -372,45 +321,29 @@ async def show_instruction(callback: CallbackQuery):
 
     text = (
         "📖 <b>Инструкция по настройке подписки</b>\n\n"
-
         "━━━━━━━━━━━━━━━━━━━━\n"
         "<b>Шаг 1: Добавь бота в канал</b>\n"
         "━━━━━━━━━━━━━━━━━━━━\n"
-        "1. Открой свой канал в Telegram\n"
-        "2. Нажми на название канала → Управление каналом\n"
-        "3. Администраторы → Добавить администратора\n"
-        "4. Найди своего бота по username\n"
-        "5. Выдай права: минимум <b>«Добавление участников»</b>\n\n"
-
+        "1. Открой свой канал\n"
+        "2. Управление каналом → Администраторы\n"
+        "3. Добавить администратора → найди бота\n"
+        "4. Выдай права: минимум <b>Добавление участников</b>\n\n"
         "━━━━━━━━━━━━━━━━━━━━\n"
         "<b>Шаг 2: Получи ID канала</b>\n"
         "━━━━━━━━━━━━━━━━━━━━\n"
-        "Способ 1 (через бота):\n"
-        "• Добавь @userinfobot в канал\n"
-        "• Перешли любое сообщение из канала боту @userinfobot\n"
-        "• Скопируй Chat ID\n\n"
-        "Способ 2 (через веб):\n"
-        "• Открой канал в web.telegram.org\n"
-        "• В адресной строке будет ID после /c/\n"
-        "• Добавь -100 перед числом\n\n"
-        "Пример ID: <code>-1001234567890</code>\n\n"
-
+        "• Перешли сообщение из канала боту @userinfobot\n"
+        "• Скопируй Chat ID (начинается с -100)\n\n"
+        "Пример: <code>-1001234567890</code>\n\n"
         "━━━━━━━━━━━━━━━━━━━━\n"
         "<b>Шаг 3: Добавь канал в бота</b>\n"
         "━━━━━━━━━━━━━━━━━━━━\n"
         "• Нажми «➕ Добавить канал»\n"
-        "• Введи ID канала\n"
-        "• Введи ссылку (https://t.me/...)\n"
-        "• Введи название канала\n\n"
-
+        "• Введи ID, ссылку и название\n\n"
         "━━━━━━━━━━━━━━━━━━━━\n"
         "<b>Шаг 4: Включи проверку</b>\n"
         "━━━━━━━━━━━━━━━━━━━━\n"
-        "• Нажми «🟢 Включить»\n"
-        "• Теперь все пользователи должны подписаться\n\n"
-
-        "⚠️ <b>Важно:</b> Бот должен быть администратором канала, "
-        "иначе он не сможет проверить подписку!"
+        "• Нажми «🟢 Включить»\n\n"
+        "⚠️ Бот должен быть администратором канала!"
     )
 
     builder = InlineKeyboardBuilder()
@@ -428,7 +361,6 @@ async def show_instruction(callback: CallbackQuery):
 
 @router.callback_query(F.data == "check_subscription")
 async def check_subscription_callback(callback: CallbackQuery, bot: Bot):
-    """Пользователь нажал 'Я подписался!'"""
     enabled_str = await db.get_setting('subscription_enabled') or '0'
     if enabled_str != '1':
         await callback.answer()
@@ -438,7 +370,6 @@ async def check_subscription_callback(callback: CallbackQuery, bot: Bot):
     not_subscribed = await check_all_subscriptions(bot, callback.from_user.id, channels)
 
     if not_subscribed:
-        # Всё ещё не подписан
         text, keyboard = build_subscribe_message(not_subscribed)
         await callback.answer("❌ Ты ещё не подписался на все каналы!", show_alert=True)
         try:
@@ -446,7 +377,6 @@ async def check_subscription_callback(callback: CallbackQuery, bot: Bot):
         except:
             pass
     else:
-        # Подписан — показываем главное меню
         await callback.answer("✅ Отлично! Добро пожаловать!")
         try:
             await callback.message.delete()
@@ -454,7 +384,6 @@ async def check_subscription_callback(callback: CallbackQuery, bot: Bot):
             pass
 
         from keyboards import main_menu_kb
-        from utils import is_admin
         from aiogram.utils.keyboard import InlineKeyboardBuilder
         from aiogram.types import InlineKeyboardButton
 
@@ -471,10 +400,6 @@ async def check_subscription_callback(callback: CallbackQuery, bot: Bot):
 
         welcome_photo = await db.get_setting('welcome_photo')
         if welcome_photo:
-            await callback.message.answer_photo(
-                photo=welcome_photo,
-                caption=welcome_text,
-                reply_markup=keyboard
-            )
+            await callback.message.answer_photo(photo=welcome_photo, caption=welcome_text, reply_markup=keyboard)
         else:
             await callback.message.answer(welcome_text, reply_markup=keyboard)
