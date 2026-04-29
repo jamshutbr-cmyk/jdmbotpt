@@ -32,8 +32,9 @@ async def is_subscribed(bot: Bot, user_id: int, channel_id: str) -> bool:
             ChatMemberStatus.KICKED,
             ChatMemberStatus.BANNED,
         ]
-        # Сохраняем в кэш
-        _cache[cache_key] = (result, now)
+        # Сохраняем в кэш только если результат True, или кэша нет
+        if result or cache_key not in _cache:
+            _cache[cache_key] = (result, now)
         return result
 
     except Exception as e:
@@ -45,14 +46,12 @@ async def is_subscribed(bot: Bot, user_id: int, channel_id: str) -> bool:
             _cache[cache_key] = (True, now)
             return True
 
-        # Если в кэше есть старый результат — используем его
+        # Если в кэше есть результат True — доверяем ему
         if cache_key in _cache:
             old_result, _ = _cache[cache_key]
-            logger.info(f"Using stale cache for user {user_id}: {old_result}")
-            _cache[cache_key] = (old_result, now)  # обновляем время
+            logger.info(f"Using cache for user {user_id}: {old_result}")
             return old_result
 
-        # Нет кэша и ошибка — не пускаем
         _cache[cache_key] = (False, now)
         return False
 
@@ -77,13 +76,22 @@ async def check_all_subscriptions(bot: Bot, user_id: int, channels: list) -> lis
     Возвращает список каналов на которые НЕ подписан.
     """
     not_subscribed = []
+    seen_channel_ids = set()  # защита от дубликатов
+
     for channel in channels:
         is_active = channel.get('is_active', 1)
         if is_active in (0, False):
             continue
-        subscribed = await is_subscribed(bot, user_id, channel['channel_id'])
+
+        channel_id = channel['channel_id']
+        if channel_id in seen_channel_ids:
+            continue  # пропускаем дубликат
+        seen_channel_ids.add(channel_id)
+
+        subscribed = await is_subscribed(bot, user_id, channel_id)
         if not subscribed:
             not_subscribed.append(channel)
+
     return not_subscribed
 
 
