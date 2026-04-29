@@ -68,6 +68,7 @@ class PostgresDatabase:
                     username TEXT,
                     first_name TEXT,
                     show_username INTEGER DEFAULT 1,
+                    notify_new_cars INTEGER DEFAULT 0,
                     last_seen TIMESTAMP DEFAULT CURRENT_TIMESTAMP
                 )
             ''')
@@ -416,6 +417,28 @@ class PostgresDatabase:
             if row is None:
                 return True
             return bool(row['show_username'])
+
+    async def set_notify_new_cars(self, user_id: int, value: bool):
+        async with self.pool.acquire() as conn:
+            await conn.execute('''
+                INSERT INTO users (user_id, notify_new_cars)
+                VALUES ($1, $2)
+                ON CONFLICT(user_id) DO UPDATE SET notify_new_cars = EXCLUDED.notify_new_cars
+            ''', user_id, 1 if value else 0)
+
+    async def get_notify_new_cars(self, user_id: int) -> bool:
+        async with self.pool.acquire() as conn:
+            row = await conn.fetchrow(
+                'SELECT notify_new_cars FROM users WHERE user_id = $1', user_id
+            )
+            if row is None:
+                return False
+            return bool(row['notify_new_cars'])
+
+    async def get_users_with_notifications(self) -> List[Dict]:
+        async with self.pool.acquire() as conn:
+            rows = await conn.fetch('SELECT * FROM users WHERE notify_new_cars = 1')
+            return [dict(r) for r in rows]
 
     async def update_suggestion_status(self, suggestion_id: int, status: str, reason: str = None):
         async with self.pool.acquire() as conn:

@@ -119,6 +119,7 @@ class Database:
                     username TEXT,
                     first_name TEXT,
                     show_username INTEGER DEFAULT 1,
+                    notify_new_cars INTEGER DEFAULT 0,
                     last_seen TIMESTAMP DEFAULT CURRENT_TIMESTAMP
                 )
             ''')
@@ -473,10 +474,39 @@ class Database:
             )
             row = await cursor.fetchone()
             if row is None:
-                return True  # по умолчанию показываем
+                return True
             return bool(row[0])
 
-    # ============= КАНАЛЫ =============
+    async def set_notify_new_cars(self, user_id: int, value: bool):
+        """Установить настройку уведомлений о новых машинах"""
+        async with aiosqlite.connect(self.db_path) as db:
+            await db.execute('''
+                INSERT INTO users (user_id, notify_new_cars)
+                VALUES (?, ?)
+                ON CONFLICT(user_id) DO UPDATE SET notify_new_cars = excluded.notify_new_cars
+            ''', (user_id, 1 if value else 0))
+            await db.commit()
+
+    async def get_notify_new_cars(self, user_id: int) -> bool:
+        """Получить настройку уведомлений"""
+        async with aiosqlite.connect(self.db_path) as db:
+            cursor = await db.execute(
+                'SELECT notify_new_cars FROM users WHERE user_id = ?', (user_id,)
+            )
+            row = await cursor.fetchone()
+            if row is None:
+                return False  # по умолчанию выключено
+            return bool(row[0])
+
+    async def get_users_with_notifications(self) -> List[Dict]:
+        """Получить всех пользователей с включёнными уведомлениями"""
+        async with aiosqlite.connect(self.db_path) as db:
+            db.row_factory = aiosqlite.Row
+            cursor = await db.execute(
+                'SELECT * FROM users WHERE notify_new_cars = 1'
+            )
+            rows = await cursor.fetchall()
+            return [dict(r) for r in rows]    # ============= КАНАЛЫ =============
 
     async def get_required_channels(self) -> List[Dict]:
         async with aiosqlite.connect(self.db_path) as db:

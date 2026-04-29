@@ -17,16 +17,24 @@ class BroadcastState(StatesGroup):
 
 # ============= НАСТРОЙКИ ПОЛЬЗОВАТЕЛЯ =============
 
-def user_settings_kb(show_username: bool) -> object:
+def user_settings_kb(show_username: bool, notify_cars: bool) -> object:
     builder = InlineKeyboardBuilder()
-    status = "✅ Показывать" if show_username else "❌ Скрыть"
+
+    status_nick = "✅ Показывать" if show_username else "❌ Скрыт"
     builder.row(InlineKeyboardButton(
-        text=f"👤 Мой ник в карточках: {status}",
+        text=f"👤 Мой ник в карточках: {status_nick}",
         callback_data="toggle_show_username"
     ))
+
+    status_notify = "🔔 Включены" if notify_cars else "🔕 Выключены"
     builder.row(InlineKeyboardButton(
-        text="🔙 Главное меню",
-        callback_data="back_to_main"
+        text=f"Уведомления о новых машинах: {status_notify}",
+        callback_data="toggle_notify_cars"
+    ))
+
+    builder.row(InlineKeyboardButton(
+        text="🔙 Назад",
+        callback_data="more_menu"
     ))
     return builder.as_markup()
 
@@ -34,20 +42,21 @@ def user_settings_kb(show_username: bool) -> object:
 @router.callback_query(F.data == "user_settings")
 async def user_settings(callback: CallbackQuery):
     show = await db.get_show_username(callback.from_user.id)
+    notify = await db.get_notify_new_cars(callback.from_user.id)
 
     text = (
         "⚙️ <b>Мои настройки</b>\n\n"
-        "👤 <b>Отображение ника</b>\n"
-        "Когда ты предлагаешь машину — твой ник может отображаться "
-        "в карточке как автор фото.\n\n"
-        f"Текущий статус: {'✅ Показывается' if show else '❌ Скрыт'}"
+        "👤 <b>Ник в карточках</b>\n"
+        "Показывать твой ник как автора фото при предложении машины.\n\n"
+        "🔔 <b>Уведомления о новых машинах</b>\n"
+        "Получать уведомление когда в каталог добавляется новая машина."
     )
 
     try:
-        await callback.message.edit_text(text, reply_markup=user_settings_kb(show))
+        await callback.message.edit_text(text, reply_markup=user_settings_kb(show, notify))
     except:
         await callback.message.delete()
-        await callback.message.answer(text, reply_markup=user_settings_kb(show))
+        await callback.message.answer(text, reply_markup=user_settings_kb(show, notify))
     await callback.answer()
 
 
@@ -60,7 +69,21 @@ async def toggle_show_username(callback: CallbackQuery):
     if new_val:
         await callback.answer("✅ Ник теперь отображается в карточках!")
     else:
-        await callback.answer("❌ Ник скрыт — не будет отображаться!")
+        await callback.answer("❌ Ник скрыт!")
+
+    await user_settings(callback)
+
+
+@router.callback_query(F.data == "toggle_notify_cars")
+async def toggle_notify_cars(callback: CallbackQuery):
+    current = await db.get_notify_new_cars(callback.from_user.id)
+    new_val = not current
+    await db.set_notify_new_cars(callback.from_user.id, new_val)
+
+    if new_val:
+        await callback.answer("🔔 Уведомления о новых машинах включены!")
+    else:
+        await callback.answer("🔕 Уведомления выключены!")
 
     await user_settings(callback)
 

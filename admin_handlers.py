@@ -213,6 +213,41 @@ async def process_locations(message: Message, state: FSMContext):
         reply_markup=back_to_main_kb()
     )
 
+    # Отправляем уведомления подписчикам
+    from aiogram import Bot
+    bot: Bot = message.bot
+    users = await db.get_users_with_notifications()
+    year_str = f" ({car['year']})" if car.get('year') else ""
+
+    notif_text = (
+        f"🔔 <b>Новая машина в каталоге!</b>\n\n"
+        f"🚗 {car['brand']} {car['model']}{year_str}\n\n"
+        f"Смотри в каталоге 👇"
+    )
+
+    notif_builder = InlineKeyboardBuilder()
+    notif_builder.row(InlineKeyboardButton(text="🚗 Открыть каталог", callback_data="catalog"))
+
+    sent = 0
+    for user in users:
+        if user['user_id'] == message.from_user.id:
+            continue  # не отправляем самому себе
+        try:
+            await bot.send_photo(
+                chat_id=user['user_id'],
+                photo=car['photo_id'],
+                caption=notif_text,
+                reply_markup=notif_builder.as_markup()
+            )
+            sent += 1
+            import asyncio
+            await asyncio.sleep(0.05)
+        except:
+            pass
+
+    if sent > 0:
+        await message.answer(f"📢 Уведомление отправлено {sent} подписчикам!")
+
 
 # ============= РЕДАКТИРОВАНИЕ =============
 
