@@ -55,6 +55,51 @@ class Database:
                 )
             ''')
             
+            # Таблица тикетов поддержки
+            await db.execute('''
+                CREATE TABLE IF NOT EXISTS tickets (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    user_id INTEGER NOT NULL,
+                    username TEXT,
+                    subject TEXT NOT NULL,
+                    status TEXT DEFAULT 'open',
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    closed_at TIMESTAMP,
+                    close_reason TEXT
+                )
+            ''')
+            
+            # Таблица сообщений тикетов
+            await db.execute('''
+                CREATE TABLE IF NOT EXISTS ticket_messages (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    ticket_id INTEGER NOT NULL,
+                    user_id INTEGER NOT NULL,
+                    is_admin INTEGER DEFAULT 0,
+                    text TEXT NOT NULL,
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    FOREIGN KEY (ticket_id) REFERENCES tickets(id) ON DELETE CASCADE
+                )
+            ''')
+            
+            # Таблица предложений машин
+            await db.execute('''
+                CREATE TABLE IF NOT EXISTS car_suggestions (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    user_id INTEGER NOT NULL,
+                    username TEXT,
+                    brand TEXT NOT NULL,
+                    model TEXT NOT NULL,
+                    year INTEGER,
+                    description TEXT,
+                    locations TEXT,
+                    photo_id TEXT NOT NULL,
+                    status TEXT DEFAULT 'pending',
+                    reject_reason TEXT,
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                )
+            ''')
+            
             # Добавляем дефолтные настройки
             await db.execute('''
                 INSERT OR IGNORE INTO settings (key, value) 
@@ -241,6 +286,124 @@ class Database:
                 INSERT OR REPLACE INTO settings (key, value) VALUES (?, ?)
             ''', (key, value))
             await db.commit()
+
+    # ============= ТИКЕТЫ =============
+
+    async def create_ticket(self, user_id: int, username: str, subject: str) -> int:
+        async with aiosqlite.connect(self.db_path) as db:
+            cursor = await db.execute('''
+                INSERT INTO tickets (user_id, username, subject)
+                VALUES (?, ?, ?)
+            ''', (user_id, username, subject))
+            await db.commit()
+            return cursor.lastrowid
+
+    async def get_ticket(self, ticket_id: int) -> Optional[Dict]:
+        async with aiosqlite.connect(self.db_path) as db:
+            db.row_factory = aiosqlite.Row
+            cursor = await db.execute('SELECT * FROM tickets WHERE id = ?', (ticket_id,))
+            row = await cursor.fetchone()
+            return dict(row) if row else None
+
+    async def get_user_tickets(self, user_id: int) -> List[Dict]:
+        async with aiosqlite.connect(self.db_path) as db:
+            db.row_factory = aiosqlite.Row
+            cursor = await db.execute('''
+                SELECT * FROM tickets WHERE user_id = ?
+                ORDER BY created_at DESC
+            ''', (user_id,))
+            rows = await cursor.fetchall()
+            return [dict(r) for r in rows]
+
+    async def get_all_tickets(self, status: str = None) -> List[Dict]:
+        async with aiosqlite.connect(self.db_path) as db:
+            db.row_factory = aiosqlite.Row
+            if status:
+                cursor = await db.execute(
+                    'SELECT * FROM tickets WHERE status = ? ORDER BY created_at DESC',
+                    (status,)
+                )
+            else:
+                cursor = await db.execute('SELECT * FROM tickets ORDER BY created_at DESC')
+            rows = await cursor.fetchall()
+            return [dict(r) for r in rows]
+
+    async def update_ticket_status(self, ticket_id: int, status: str, reason: str = None):
+        async with aiosqlite.connect(self.db_path) as db:
+            if status == 'closed':
+                await db.execute('''
+                    UPDATE tickets SET status = ?, close_reason = ?, closed_at = CURRENT_TIMESTAMP
+                    WHERE id = ?
+                ''', (status, reason, ticket_id))
+            else:
+                await db.execute('UPDATE tickets SET status = ? WHERE id = ?', (status, ticket_id))
+            await db.commit()
+
+    async def add_ticket_message(self, ticket_id: int, user_id: int, text: str, is_admin: bool = False):
+        async with aiosqlite.connect(self.db_path) as db:
+            await db.execute('''
+                INSERT INTO ticket_messages (ticket_id, user_id, is_admin, text)
+                VALUES (?, ?, ?, ?)
+            ''', (ticket_id, user_id, 1 if is_admin else 0, text))
+            await db.commit()
+
+    async def get_ticket_messages(self, ticket_id: int) -> List[Dict]:
+        async with aiosqlite.connect(self.db_path) as db:
+            db.row_factory = aiosqlite.Row
+            cursor = await db.execute('''
+                SELECT * FROM ticket_messages WHERE ticket_id = ?
+                ORDER BY created_at ASC
+            ''', (ticket_id,))
+            rows = await cursor.fetchall()
+            return [dict(r) for r in rows]
+
+    # ============= ПРЕДЛОЖЕНИЯ МАШИН =============
+
+    async def create_suggestion(self, user_id: int, username: str, brand: str,
+                                 model: str, year: Optional[int], description: Optional[str],
+                                 locations: Optional[str], photo_id: str) -> int:
+        async with aiosqlite.connect(self.db_path) as db:
+            cursor = await db.execute('''
+                INSERT INTO car_suggestions
+                (user_id, username, brand, model, year, description, locations, photo_id)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+            ''', (user_id, username, brand, model, year, description, locations, photo_id))
+            await db.commit()
+            return cursor.lastrowid
+
+    async def get_suggestion(self, suggestion_id: int) -> Optional[Dict]:
+        async with aiosqlite.connect(self.db_path) as db:
+            db.row_factory = aiosqlite.Row
+            cursor = await db.execute('SELECT * FROM car_suggestions WHERE id = ?', (suggestion_id,))
+            row = await cursor.fetchone()
+            return dict(row) if row else None
+
+    async def get_pending_suggestions(self) -> List[Dict]:
+        async with aiosqlite.connect(self.db_path) as db:
+            db.row_factory = aiosqlite.Row
+            cursor = await db.execute('''
+                SELECT * FROM car_suggestions WHERE status = 'pending'
+                ORDER BY created_at ASC
+            ''')
+            rows = await cursor.fetchall()
+            return [dict(r) for r in rows]
+
+    async def update_suggestion_status(self, suggestion_id: int, status: str, reason: str = None):
+        async with aiosqlite.connect(self.db_path) as db:
+            await db.execute('''
+                UPDATE car_suggestions SET status = ?, reject_reason = ? WHERE id = ?
+            ''', (status, reason, suggestion_id))
+            await db.commit()
+
+    async def get_user_suggestions(self, user_id: int) -> List[Dict]:
+        async with aiosqlite.connect(self.db_path) as db:
+            db.row_factory = aiosqlite.Row
+            cursor = await db.execute(
+                'SELECT * FROM car_suggestions WHERE user_id = ? ORDER BY created_at DESC',
+                (user_id,)
+            )
+            rows = await cursor.fetchall()
+            return [dict(r) for r in rows]
 
 
 db = Database()

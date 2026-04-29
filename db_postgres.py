@@ -61,7 +61,48 @@ class PostgresDatabase:
                 )
             ''')
             
-            # Добавляем дефолтные настройки
+            # Таблица тикетов поддержки
+            await conn.execute('''
+                CREATE TABLE IF NOT EXISTS tickets (
+                    id SERIAL PRIMARY KEY,
+                    user_id BIGINT NOT NULL,
+                    username TEXT,
+                    subject TEXT NOT NULL,
+                    status TEXT DEFAULT 'open',
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    closed_at TIMESTAMP,
+                    close_reason TEXT
+                )
+            ''')
+
+            await conn.execute('''
+                CREATE TABLE IF NOT EXISTS ticket_messages (
+                    id SERIAL PRIMARY KEY,
+                    ticket_id INTEGER NOT NULL,
+                    user_id BIGINT NOT NULL,
+                    is_admin INTEGER DEFAULT 0,
+                    text TEXT NOT NULL,
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    FOREIGN KEY (ticket_id) REFERENCES tickets(id) ON DELETE CASCADE
+                )
+            ''')
+
+            await conn.execute('''
+                CREATE TABLE IF NOT EXISTS car_suggestions (
+                    id SERIAL PRIMARY KEY,
+                    user_id BIGINT NOT NULL,
+                    username TEXT,
+                    brand TEXT NOT NULL,
+                    model TEXT NOT NULL,
+                    year INTEGER,
+                    description TEXT,
+                    locations TEXT,
+                    photo_id TEXT NOT NULL,
+                    status TEXT DEFAULT 'pending',
+                    reject_reason TEXT,
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                )
+            ''')
             await conn.execute('''
                 INSERT INTO settings (key, value) 
                 VALUES ('welcome_text', '🚗 <b>Добро пожаловать в JDM Cars Bot!</b>\n\nЗдесь ты найдешь крутые тачки, сфотографированные на улицах города.\n\nВыбери действие из меню ниже:')
@@ -229,8 +270,101 @@ class PostgresDatabase:
                 ON CONFLICT (key) DO UPDATE SET value = $2
             ''', key, value)
 
+    # ============= ТИКЕТЫ =============
+
+    async def create_ticket(self, user_id: int, username: str, subject: str) -> int:
+        async with self.pool.acquire() as conn:
+            return await conn.fetchval('''
+                INSERT INTO tickets (user_id, username, subject)
+                VALUES ($1, $2, $3) RETURNING id
+            ''', user_id, username, subject)
+
+    async def get_ticket(self, ticket_id: int) -> Optional[Dict]:
+        async with self.pool.acquire() as conn:
+            row = await conn.fetchrow('SELECT * FROM tickets WHERE id = $1', ticket_id)
+            return dict(row) if row else None
+
+    async def get_user_tickets(self, user_id: int) -> List[Dict]:
+        async with self.pool.acquire() as conn:
+            rows = await conn.fetch(
+                'SELECT * FROM tickets WHERE user_id = $1 ORDER BY created_at DESC', user_id
+            )
+            return [dict(r) for r in rows]
+
+    async def get_all_tickets(self, status: str = None) -> List[Dict]:
+        async with self.pool.acquire() as conn:
+            if status:
+                rows = await conn.fetch(
+                    'SELECT * FROM tickets WHERE status = $1 ORDER BY created_at DESC', status
+                )
+            else:
+                rows = await conn.fetch('SELECT * FROM tickets ORDER BY created_at DESC')
+            return [dict(r) for r in rows]
+
+    async def update_ticket_status(self, ticket_id: int, status: str, reason: str = None):
+        async with self.pool.acquire() as conn:
+            if status == 'closed':
+                await conn.execute('''
+                    UPDATE tickets SET status = $1, close_reason = $2, closed_at = NOW()
+                    WHERE id = $3
+                ''', status, reason, ticket_id)
+            else:
+                await conn.execute('UPDATE tickets SET status = $1 WHERE id = $2', status, ticket_id)
+
+    async def add_ticket_message(self, ticket_id: int, user_id: int, text: str, is_admin: bool = False):
+        async with self.pool.acquire() as conn:
+            await conn.execute('''
+                INSERT INTO ticket_messages (ticket_id, user_id, is_admin, text)
+                VALUES ($1, $2, $3, $4)
+            ''', ticket_id, user_id, 1 if is_admin else 0, text)
+
+    async def get_ticket_messages(self, ticket_id: int) -> List[Dict]:
+        async with self.pool.acquire() as conn:
+            rows = await conn.fetch(
+                'SELECT * FROM ticket_messages WHERE ticket_id = $1 ORDER BY created_at ASC',
+                ticket_id
+            )
+            return [dict(r) for r in rows]
+
+    # ============= ПРЕДЛОЖЕНИЯ =============
+
+    async def create_suggestion(self, user_id: int, username: str, brand: str,
+                                 model: str, year: Optional[int], description: Optional[str],
+                                 locations: Optional[str], photo_id: str) -> int:
+        async with self.pool.acquire() as conn:
+            return await conn.fetchval('''
+                INSERT INTO car_suggestions
+                (user_id, username, brand, model, year, description, locations, photo_id)
+                VALUES ($1, $2, $3, $4, $5, $6, $7, $8) RETURNING id
+            ''', user_id, username, brand, model, year, description, locations, photo_id)
+
+    async def get_suggestion(self, suggestion_id: int) -> Optional[Dict]:
+        async with self.pool.acquire() as conn:
+            row = await conn.fetchrow('SELECT * FROM car_suggestions WHERE id = $1', suggestion_id)
+            return dict(row) if row else None
+
+    async def get_pending_suggestions(self) -> List[Dict]:
+        async with self.pool.acquire() as conn:
+            rows = await conn.fetch(
+                "SELECT * FROM car_suggestions WHERE status = 'pending' ORDER BY created_at ASC"
+            )
+            return [dict(r) for r in rows]
+
+    async def get_user_suggestions(self, user_id: int) -> List[Dict]:
+        async with self.pool.acquire() as conn:
+            rows = await conn.fetch(
+                'SELECT * FROM car_suggestions WHERE user_id = $1 ORDER BY created_at DESC',
+                user_id
+            )
+            return [dict(r) for r in rows]
+
+    async def update_suggestion_status(self, suggestion_id: int, status: str, reason: str = None):
+        async with self.pool.acquire() as conn:
+            await conn.execute('''
+                UPDATE car_suggestions SET status = $1, reject_reason = $2 WHERE id = $3
+            ''', status, reason, suggestion_id)
+
     async def close(self):
-        """Закрыть пул соединений"""
         if self.pool:
             await self.pool.close()
 

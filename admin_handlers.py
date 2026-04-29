@@ -1,11 +1,14 @@
 from aiogram import F, Router
 from aiogram.fsm.context import FSMContext
 from aiogram.types import CallbackQuery, Message
+from aiogram.utils.keyboard import InlineKeyboardBuilder
+from aiogram.types import InlineKeyboardButton
 
 from db_adapter import db
 from keyboards import admin_menu_kb, catalog_kb, confirm_delete_kb, cancel_kb, back_to_main_kb, search_results_kb, settings_menu_kb
 from states import AddCarStates, SettingsStates, EditCarStates
-from utils import is_admin, format_car_info
+from utils import is_admin, is_owner, add_admin, remove_admin, get_all_admin_ids
+from config import OWNER_ID, ADMIN_IDS
 
 router = Router()
 
@@ -20,7 +23,7 @@ def admin_filter(callback: CallbackQuery) -> bool:
 @router.callback_query(F.data == "admin_panel")
 async def show_admin_panel(callback: CallbackQuery):
     """Показать админ-панель"""
-    if not is_admin(callback.from_user.id):
+    if not await is_admin(callback.from_user.id):
         await callback.answer("❌ У тебя нет доступа к админ-панели", show_alert=True)
         return
     
@@ -47,7 +50,7 @@ async def show_admin_panel(callback: CallbackQuery):
 @router.callback_query(F.data == "admin_add")
 async def start_add_car(callback: CallbackQuery, state: FSMContext):
     """Начать добавление машины"""
-    if not is_admin(callback.from_user.id):
+    if not await is_admin(callback.from_user.id):
         await callback.answer("❌ Нет доступа", show_alert=True)
         return
     
@@ -216,7 +219,7 @@ async def process_locations(message: Message, state: FSMContext):
 @router.callback_query(F.data.startswith("edit_"))
 async def edit_car_menu(callback: CallbackQuery):
     """Меню редактирования машины"""
-    if not is_admin(callback.from_user.id):
+    if not await is_admin(callback.from_user.id):
         await callback.answer("❌ Нет доступа", show_alert=True)
         return
     
@@ -266,7 +269,7 @@ async def edit_car_menu(callback: CallbackQuery):
 @router.callback_query(F.data.startswith("editfield_"))
 async def edit_car_field(callback: CallbackQuery, state: FSMContext):
     """Начать редактирование конкретного поля"""
-    if not is_admin(callback.from_user.id):
+    if not await is_admin(callback.from_user.id):
         await callback.answer("❌ Нет доступа", show_alert=True)
         return
     
@@ -330,7 +333,7 @@ async def process_edit_value(message: Message, state: FSMContext):
 @router.callback_query(F.data == "admin_list")
 async def show_admin_list(callback: CallbackQuery):
     """Показать список машин для админа"""
-    if not is_admin(callback.from_user.id):
+    if not await is_admin(callback.from_user.id):
         await callback.answer("❌ Нет доступа", show_alert=True)
         return
     
@@ -359,7 +362,7 @@ async def show_admin_list(callback: CallbackQuery):
 @router.callback_query(F.data.startswith("delete_"))
 async def confirm_delete(callback: CallbackQuery):
     """Подтверждение удаления"""
-    if not is_admin(callback.from_user.id):
+    if not await is_admin(callback.from_user.id):
         await callback.answer("❌ Нет доступа", show_alert=True)
         return
     
@@ -399,7 +402,7 @@ async def confirm_delete(callback: CallbackQuery):
 @router.callback_query(F.data.startswith("confirm_delete_"))
 async def delete_car(callback: CallbackQuery):
     """Удаление машины"""
-    if not is_admin(callback.from_user.id):
+    if not await is_admin(callback.from_user.id):
         await callback.answer("❌ Нет доступа", show_alert=True)
         return
     
@@ -425,7 +428,7 @@ async def delete_car(callback: CallbackQuery):
 @router.callback_query(F.data == "admin_settings")
 async def show_settings(callback: CallbackQuery):
     """Показать настройки"""
-    if not is_admin(callback.from_user.id):
+    if not await is_admin(callback.from_user.id):
         await callback.answer("❌ Нет доступа", show_alert=True)
         return
     
@@ -451,7 +454,7 @@ async def show_settings(callback: CallbackQuery):
 @router.callback_query(F.data == "settings_welcome")
 async def edit_welcome(callback: CallbackQuery, state: FSMContext):
     """Изменить приветствие"""
-    if not is_admin(callback.from_user.id):
+    if not await is_admin(callback.from_user.id):
         await callback.answer("❌ Нет доступа", show_alert=True)
         return
     
@@ -499,7 +502,7 @@ async def process_welcome_text(message: Message, state: FSMContext):
 @router.callback_query(F.data == "settings_bot_name")
 async def edit_bot_name(callback: CallbackQuery, state: FSMContext):
     """Изменить название бота"""
-    if not is_admin(callback.from_user.id):
+    if not await is_admin(callback.from_user.id):
         await callback.answer("❌ Нет доступа", show_alert=True)
         return
     
@@ -547,7 +550,7 @@ async def process_bot_name(message: Message, state: FSMContext):
 @router.callback_query(F.data == "settings_reset")
 async def reset_settings(callback: CallbackQuery):
     """Сброс настроек до дефолтных"""
-    if not is_admin(callback.from_user.id):
+    if not await is_admin(callback.from_user.id):
         await callback.answer("❌ Нет доступа", show_alert=True)
         return
     
@@ -577,7 +580,7 @@ async def reset_settings(callback: CallbackQuery):
 @router.callback_query(F.data == "settings_welcome_photo")
 async def edit_welcome_photo(callback: CallbackQuery, state: FSMContext):
     """Управление фото приветствия"""
-    if not is_admin(callback.from_user.id):
+    if not await is_admin(callback.from_user.id):
         await callback.answer("❌ Нет доступа", show_alert=True)
         return
     
@@ -634,7 +637,7 @@ async def invalid_welcome_photo(message: Message):
 @router.callback_query(F.data == "settings_delete_welcome_photo")
 async def delete_welcome_photo(callback: CallbackQuery, state: FSMContext):
     """Удалить фото приветствия"""
-    if not is_admin(callback.from_user.id):
+    if not await is_admin(callback.from_user.id):
         await callback.answer("❌ Нет доступа", show_alert=True)
         return
     
@@ -646,3 +649,167 @@ async def delete_welcome_photo(callback: CallbackQuery, state: FSMContext):
         reply_markup=settings_menu_kb()
     )
     await callback.answer("✅ Удалено!")
+
+
+# ============= УПРАВЛЕНИЕ АДМИНАМИ =============
+
+class AddAdminState(StatesGroup):
+    waiting_for_id = State()
+
+
+from aiogram.fsm.state import StatesGroup, State
+
+
+@router.callback_query(F.data == "manage_admins")
+async def manage_admins(callback: CallbackQuery):
+    if not await is_admin(callback.from_user.id):
+        await callback.answer("❌ Нет доступа", show_alert=True)
+        return
+
+    all_ids = await get_all_admin_ids()
+
+    text = "👥 <b>Управление администраторами</b>\n\n"
+    text += f"👑 Владелец: <code>{OWNER_ID}</code>\n\n"
+    text += "📋 Текущие администраторы:\n"
+
+    for uid in all_ids:
+        if uid == OWNER_ID:
+            text += f"• <code>{uid}</code> 👑 Владелец\n"
+        elif uid in ADMIN_IDS:
+            text += f"• <code>{uid}</code> 🔒 Из конфига\n"
+        else:
+            text += f"• <code>{uid}</code> ➕ Добавлен\n"
+
+    builder = InlineKeyboardBuilder()
+    builder.row(InlineKeyboardButton(text="➕ Добавить админа", callback_data="admin_add_admin"))
+
+    # Кнопки удаления только для динамических
+    extra = await db.get_setting('extra_admins') or ''
+    extra_ids = [int(x.strip()) for x in extra.split(',') if x.strip()]
+    for uid in extra_ids:
+        builder.row(InlineKeyboardButton(
+            text=f"🗑 Удалить {uid}",
+            callback_data=f"admin_remove_{uid}"
+        ))
+
+    builder.row(InlineKeyboardButton(text="🔙 Настройки", callback_data="admin_settings"))
+
+    try:
+        await callback.message.edit_text(text, reply_markup=builder.as_markup())
+    except:
+        await callback.message.delete()
+        await callback.message.answer(text, reply_markup=builder.as_markup())
+    await callback.answer()
+
+
+@router.callback_query(F.data == "admin_add_admin")
+async def add_admin_start(callback: CallbackQuery, state: FSMContext):
+    if not await is_admin(callback.from_user.id):
+        await callback.answer("❌ Нет доступа", show_alert=True)
+        return
+
+    builder = InlineKeyboardBuilder()
+    builder.row(InlineKeyboardButton(text="❌ Отмена", callback_data="manage_admins"))
+
+    try:
+        await callback.message.edit_text(
+            "➕ <b>Добавление администратора</b>\n\n"
+            "Отправь Telegram ID пользователя которого хочешь сделать админом.\n\n"
+            "Узнать ID можно через @userinfobot",
+            reply_markup=builder.as_markup()
+        )
+    except:
+        await callback.message.delete()
+        await callback.message.answer(
+            "➕ <b>Добавление администратора</b>\n\n"
+            "Отправь Telegram ID пользователя:",
+            reply_markup=builder.as_markup()
+        )
+
+    await state.set_state(AddAdminState.waiting_for_id)
+    await callback.answer()
+
+
+@router.message(AddAdminState.waiting_for_id)
+async def process_add_admin(message: Message, state: FSMContext):
+    if not await is_admin(message.from_user.id):
+        return
+
+    try:
+        new_id = int(message.text.strip())
+    except ValueError:
+        await message.answer("❌ Введи числовой ID.")
+        return
+
+    if new_id == OWNER_ID:
+        await message.answer("👑 Это владелец бота, он уже имеет все права!")
+        await state.clear()
+        return
+
+    result = await add_admin(new_id)
+
+    await state.clear()
+
+    if result:
+        await message.answer(
+            f"✅ Пользователь <code>{new_id}</code> добавлен как администратор!",
+            reply_markup=InlineKeyboardBuilder().row(
+                InlineKeyboardButton(text="👥 К управлению", callback_data="manage_admins")
+            ).as_markup()
+        )
+    else:
+        await message.answer(
+            f"ℹ️ Пользователь <code>{new_id}</code> уже является администратором.",
+            reply_markup=InlineKeyboardBuilder().row(
+                InlineKeyboardButton(text="👥 К управлению", callback_data="manage_admins")
+            ).as_markup()
+        )
+
+
+@router.callback_query(F.data.startswith("admin_remove_"))
+async def remove_admin_handler(callback: CallbackQuery):
+    if not await is_admin(callback.from_user.id):
+        await callback.answer("❌ Нет доступа", show_alert=True)
+        return
+
+    target_id = int(callback.data.split("_")[2])
+
+    # Защита владельца
+    if target_id == OWNER_ID:
+        import random
+        phrases = [
+            "🛡 Ха! Ты думал это сработает? Я защищаю своего хозяина! 👑",
+            "😤 Не трогай хозяина! Он создал меня и я ему предан навсегда!",
+            "🤖 Система защиты активирована. Попытка отклонена. Хозяин в безопасности 👑",
+            "💀 Даже не мечтай. @pr0stoy4elovek — мой создатель и его права неприкосновенны!",
+            "🔒 Доступ запрещён. Этот пользователь — мой хозяин. Я никогда его не предам.",
+            "😂 Серьёзно? Ты пытаешься снять права с создателя бота? Смешно.",
+            "⚡ ОШИБКА 403: Хозяин под защитой. Попытка заблокирована навсегда.",
+            "🐕 Я как верный пёс — хозяина не сдам никогда и никому!",
+            "👑 Это мой создатель. Его права вечны. Попробуй ещё раз — получишь тот же ответ.",
+            "🚫 Нельзя. Запрещено. Невозможно. Недопустимо. Короче — НЕТ.",
+        ]
+        await callback.answer(random.choice(phrases), show_alert=True)
+        return
+
+    result = await remove_admin(target_id)
+
+    if result == 'owner':
+        import random
+        phrases = [
+            "🛡 Это владелец! Нельзя снять его права. Бот не позволит этого сделать! 👑",
+            "😤 Хозяин под защитой! Даже не пытайся.",
+        ]
+        await callback.answer(random.choice(phrases), show_alert=True)
+    elif result == 'static':
+        await callback.answer(
+            "🔒 Этот админ прописан в конфиге сервера. Удали его из ADMIN_IDS на Railway.",
+            show_alert=True
+        )
+    elif result == 'removed':
+        await callback.answer(f"✅ Администратор {target_id} удалён!")
+        await manage_admins(callback)
+    elif result == 'not_found':
+        await callback.answer("❌ Администратор не найден.", show_alert=True)
+    else:
+        await callback.answer("❌ Ошибка при удалении.", show_alert=True)

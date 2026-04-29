@@ -18,6 +18,8 @@ from keyboards import (
 from states import AddCarStates, SearchStates
 from utils import is_admin, format_car_info, format_stats
 import admin_handlers
+import support_handlers
+import suggest_handlers
 
 # Настройка логирования
 logging.basicConfig(level=logging.INFO)
@@ -27,8 +29,10 @@ logger = logging.getLogger(__name__)
 bot = Bot(token=BOT_TOKEN, default=DefaultBotProperties(parse_mode=ParseMode.HTML))
 dp = Dispatcher()
 
-# Подключаем админ-обработчики
+# Подключаем обработчики
 dp.include_router(admin_handlers.router)
+dp.include_router(support_handlers.router)
+dp.include_router(suggest_handlers.router)
 
 # Константы
 CARS_PER_PAGE = 6
@@ -49,7 +53,7 @@ async def cmd_start(message: Message):
     
     keyboard = main_menu_kb()
     
-    if is_admin(message.from_user.id):
+    if await is_admin(message.from_user.id):
         builder = InlineKeyboardBuilder()
         for row in keyboard.inline_keyboard:
             builder.row(*row)
@@ -98,7 +102,7 @@ async def back_to_main(callback: CallbackQuery, state: FSMContext):
     
     keyboard = main_menu_kb()
     
-    if is_admin(callback.from_user.id):
+    if await is_admin(callback.from_user.id):
         builder = InlineKeyboardBuilder()
         for row in keyboard.inline_keyboard:
             builder.row(*row)
@@ -170,7 +174,7 @@ async def show_catalog(callback: CallbackQuery):
     
     # Проверяем избранное
     is_fav = await db.is_favorite(callback.from_user.id, car['id'])
-    is_adm = is_admin(callback.from_user.id)
+    is_adm = await is_admin(callback.from_user.id)
     
     text = format_car_info(car)
     # Жёсткая обрезка прямо перед отправкой
@@ -213,7 +217,7 @@ async def show_car(callback: CallbackQuery):
     
     # Проверяем, в избранном ли
     is_fav = await db.is_favorite(callback.from_user.id, car_id)
-    is_adm = is_admin(callback.from_user.id)
+    is_adm = await is_admin(callback.from_user.id)
     
     text = format_car_info(car)
     
@@ -268,13 +272,13 @@ async def toggle_favorite(callback: CallbackQuery):
                 current_index = i
                 break
         
-        is_adm = is_admin(user_id)
+        is_adm = await is_admin(user_id)
         await callback.message.edit_reply_markup(
             reply_markup=car_navigation_kb(current_index, len(all_cars), car_id, not is_fav, is_adm)
         )
     else:
         # Это из поиска - простая клавиатура
-        is_adm = is_admin(user_id)
+        is_adm = await is_admin(user_id)
         builder = InlineKeyboardBuilder()
         
         fav_text = "💔 Убрать из избранного" if not is_fav else "❤️ В избранное"
@@ -317,7 +321,7 @@ async def show_favorites(callback: CallbackQuery):
     await db.increment_views(car['id'], callback.from_user.id)
     
     is_fav = True  # Точно в избранном
-    is_adm = is_admin(callback.from_user.id)
+    is_adm = await is_admin(callback.from_user.id)
     
     text = "⭐ <b>Избранное</b>\n\n" + format_car_info(car)
     
@@ -415,7 +419,7 @@ async def show_random_car(callback: CallbackQuery):
     await db.increment_views(car['id'], callback.from_user.id)
     
     is_fav = await db.is_favorite(callback.from_user.id, car['id'])
-    is_adm = is_admin(callback.from_user.id)
+    is_adm = await is_admin(callback.from_user.id)
     
     text = "🎲 <b>Случайная машина дня!</b>\n\n" + format_car_info(car)
     

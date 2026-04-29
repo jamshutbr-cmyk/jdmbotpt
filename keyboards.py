@@ -14,7 +14,13 @@ def main_menu_kb() -> InlineKeyboardMarkup:
         InlineKeyboardButton(text="🎲 Случайная", callback_data="random")
     )
     builder.row(
+        InlineKeyboardButton(text="📸 Предложить машину", callback_data="suggest_menu")
+    )
+    builder.row(
         InlineKeyboardButton(text="📊 Статистика", callback_data="stats"),
+        InlineKeyboardButton(text="🆘 Поддержка", callback_data="support_menu")
+    )
+    builder.row(
         InlineKeyboardButton(text="ℹ️ О боте", callback_data="about")
     )
     return builder.as_markup()
@@ -26,6 +32,10 @@ def admin_menu_kb() -> InlineKeyboardMarkup:
     builder.row(
         InlineKeyboardButton(text="➕ Добавить машину", callback_data="admin_add"),
         InlineKeyboardButton(text="📋 Список машин", callback_data="admin_list")
+    )
+    builder.row(
+        InlineKeyboardButton(text="🎫 Тикеты", callback_data="admin_tickets"),
+        InlineKeyboardButton(text="📸 Предложения", callback_data="admin_suggestions")
     )
     builder.row(
         InlineKeyboardButton(text="⚙️ Настройки", callback_data="admin_settings")
@@ -47,6 +57,9 @@ def settings_menu_kb() -> InlineKeyboardMarkup:
     )
     builder.row(
         InlineKeyboardButton(text="🖼 Фото приветствия", callback_data="settings_welcome_photo")
+    )
+    builder.row(
+        InlineKeyboardButton(text="👥 Управление админами", callback_data="manage_admins")
     )
     builder.row(
         InlineKeyboardButton(text="🔄 Сбросить всё", callback_data="settings_reset")
