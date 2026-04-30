@@ -13,7 +13,8 @@ from config import BOT_TOKEN
 from db_adapter import db
 from keyboards import (
     main_menu_kb, more_menu_kb, admin_menu_kb, car_navigation_kb, catalog_kb,
-    confirm_delete_kb, cancel_kb, back_to_main_kb, back_to_more_kb, search_results_kb
+    confirm_delete_kb, cancel_kb, back_to_main_kb, back_to_more_kb, search_results_kb,
+    top_cars_list_kb, top_car_detail_kb
 )
 from states import AddCarStates, SearchStates
 from utils import is_admin, format_car_info, format_stats
@@ -643,9 +644,9 @@ async def update_rating_keyboard(callback: CallbackQuery, car_id: int, user_id: 
 
 @dp.callback_query(F.data == "top_cars")
 async def show_top_cars(callback: CallbackQuery):
-    """Показать топ машин по рейтингу"""
+    """Показать топ машин — список с рейтингом"""
     top_cars = await db.get_top_rated_cars(limit=10)
-    
+
     if not top_cars:
         text = (
             "🏆 <b>Топ машин</b>\n\n"
@@ -660,29 +661,71 @@ async def show_top_cars(callback: CallbackQuery):
             await callback.message.answer(text, reply_markup=back_to_main_kb())
         await callback.answer()
         return
-    
-    # Показываем первую машину из топа
-    car = top_cars[0]
-    
-    await db.increment_views(car['id'], callback.from_user.id)
-    
-    is_fav = await db.is_favorite(callback.from_user.id, car['id'])
+
+    medals = {1: "🥇", 2: "🥈", 3: "🥉"}
+    text = "🏆 <b>Топ машин по рейтингу</b>\n\n"
+    for i, car in enumerate(top_cars, 1):
+        medal = medals.get(i, f"{i}.")
+        likes = car.get('likes', 0)
+        dislikes = car.get('dislikes', 0)
+        score = car.get('score', 0)
+        year = f" ({car['year']})" if car.get('year') else ""
+        text += f"{medal} <b>{car['brand']} {car['model']}</b>{year}\n"
+        text += f"   👍 {likes}  👎 {dislikes}  ⭐ {score:+d}\n\n"
+
+    text += "Нажми на машину, чтобы посмотреть карточку:"
+
+    try:
+        await callback.message.edit_text(text, reply_markup=top_cars_list_kb(top_cars))
+    except:
+        await callback.message.delete()
+        await callback.message.answer(text, reply_markup=top_cars_list_kb(top_cars))
+    await callback.answer()
+
+
+@dp.callback_query(F.data.startswith("top_car_"))
+async def show_top_car(callback: CallbackQuery):
+    """Показать карточку машины из топа"""
+    parts = callback.data.split("_")
+    # top_car_{place}_{car_id}
+    place = int(parts[2])
+    car_id = int(parts[3])
+
+    car = await db.get_car(car_id)
+    if not car:
+        await callback.answer("❌ Машина не найдена", show_alert=True)
+        return
+
+    await db.increment_views(car_id, callback.from_user.id)
+
+    is_fav = await db.is_favorite(callback.from_user.id, car_id)
     is_adm = await is_admin(callback.from_user.id)
-    user_rating = await db.get_car_rating(callback.from_user.id, car['id'])
-    rating_stats = await db.get_car_rating_stats(car['id'])
-    
-    text = f"🏆 <b>Топ машин</b> (#{1})\n\n" + format_car_info(car, rating_stats=rating_stats)
-    
+    user_rating = await db.get_car_rating(callback.from_user.id, car_id)
+    rating_stats = await db.get_car_rating_stats(car_id)
+
+    medals = {1: "🥇", 2: "🥈", 3: "🥉"}
+    medal = medals.get(place, f"#{place}")
+    text = f"🏆 <b>Топ машин — {medal} место</b>\n\n" + format_car_info(car, rating_stats=rating_stats)
+    if len(text) > 1024:
+        text = text[:1020] + "..."
+
     try:
         await callback.message.delete()
     except:
         pass
-    
-    await callback.message.answer_photo(
-        photo=car['photo_id'],
-        caption=text,
-        reply_markup=car_navigation_kb(0, len(top_cars), car['id'], is_fav, is_adm, user_rating, rating_stats)
-    )
+
+    try:
+        await callback.message.answer_photo(
+            photo=car['photo_id'],
+            caption=text,
+            reply_markup=top_car_detail_kb(car_id, is_fav, is_adm, user_rating, rating_stats)
+        )
+    except Exception as e:
+        logger.error(f"Ошибка отправки фото топ-машины: {e}")
+        await callback.message.answer(
+            text,
+            reply_markup=top_car_detail_kb(car_id, is_fav, is_adm, user_rating, rating_stats)
+        )
     await callback.answer()
 
 

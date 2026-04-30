@@ -194,6 +194,61 @@ def catalog_kb(cars: list, page: int = 0, total_pages: int = 1) -> InlineKeyboar
     return builder.as_markup()
 
 
+def top_cars_list_kb(top_cars: list) -> InlineKeyboardMarkup:
+    """Клавиатура списка топ машин"""
+    builder = InlineKeyboardBuilder()
+    medals = {1: "🥇", 2: "🥈", 3: "🥉"}
+    for i, car in enumerate(top_cars, 1):
+        medal = medals.get(i, f"{i}.")
+        year = f" ({car['year']})" if car.get('year') else ""
+        score = car.get('score', 0)
+        label = f"{medal} {car['brand']} {car['model']}{year}  ⭐{score:+d}"
+        builder.row(
+            InlineKeyboardButton(
+                text=label,
+                callback_data=f"top_car_{i}_{car['id']}"
+            )
+        )
+    builder.row(InlineKeyboardButton(text="🔙 Главное меню", callback_data="back_to_main"))
+    return builder.as_markup()
+
+
+def top_car_detail_kb(car_id: int, is_favorite: bool = False, is_admin: bool = False,
+                      user_rating: int = None, rating_stats: Dict = None) -> InlineKeyboardMarkup:
+    """Клавиатура карточки машины из топа"""
+    builder = InlineKeyboardBuilder()
+
+    likes = rating_stats.get('likes', 0) if rating_stats else 0
+    dislikes = rating_stats.get('dislikes', 0) if rating_stats else 0
+
+    like_text = "👍✅" if user_rating == 1 else "👍"
+    dislike_text = "👎✅" if user_rating == -1 else "👎"
+
+    if likes > 0:
+        like_text += f" {likes}"
+    if dislikes > 0:
+        dislike_text += f" {dislikes}"
+
+    builder.row(
+        InlineKeyboardButton(text=like_text, callback_data=f"rate_like_{car_id}"),
+        InlineKeyboardButton(text=dislike_text, callback_data=f"rate_dislike_{car_id}")
+    )
+
+    fav_text = "💔 Убрать из избранного" if is_favorite else "❤️ В избранное"
+    builder.row(InlineKeyboardButton(text=fav_text, callback_data=f"fav_{car_id}"))
+
+    if is_admin:
+        builder.row(
+            InlineKeyboardButton(text="✏️ Редактировать", callback_data=f"edit_{car_id}"),
+            InlineKeyboardButton(text="🗑️ Удалить", callback_data=f"delete_{car_id}")
+        )
+
+    builder.row(InlineKeyboardButton(text="🏆 Назад к топу", callback_data="top_cars"))
+    builder.row(InlineKeyboardButton(text="🔙 Главное меню", callback_data="back_to_main"))
+
+    return builder.as_markup()
+
+
 def search_results_kb() -> InlineKeyboardMarkup:
     """Клавиатура для результатов поиска"""
     builder = InlineKeyboardBuilder()
