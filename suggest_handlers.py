@@ -20,11 +20,12 @@ async def suggest_menu(callback: CallbackQuery):
         "Видел крутую тачку на улице? Поделись с нами!\n\n"
         "Твоё фото пройдёт модерацию и появится в каталоге.\n\n"
         "📋 Что нужно:\n"
-        "• Фото машины\n"
+        "• Фото машины (обязательно)\n"
         "• Марка и модель\n"
         "• Год (по желанию)\n"
         "• Описание (по желанию)\n"
-        "• Место где видел"
+        "• Место где видел\n"
+        "• До 4 доп. фото/видео (по желанию)"
     )
     builder = InlineKeyboardBuilder()
     builder.row(InlineKeyboardButton(text="📸 Предложить машину", callback_data="suggest_start"))
@@ -161,32 +162,106 @@ async def suggest_locations(message: Message, state: FSMContext, bot: Bot):
     if locations == '-':
         locations = None
 
+    await state.update_data(locations=locations, extra_media=[])
+
+    builder = InlineKeyboardBuilder()
+    builder.row(InlineKeyboardButton(text="✅ Отправить без доп. медиа", callback_data="suggest_submit"))
+    builder.row(InlineKeyboardButton(text="❌ Отмена", callback_data="suggest_menu"))
+
+    await message.answer(
+        "✅ Локации сохранены!\n\n"
+        "📷 <b>Доп. медиа (необязательно)</b>\n\n"
+        "Можешь добавить до 4 дополнительных фото или видео.\n"
+        "Отправляй по одному — фото или видео.\n\n"
+        "Когда закончишь — нажми <b>Отправить</b>.",
+        reply_markup=builder.as_markup()
+    )
+    await state.set_state(SuggestCarStates.waiting_for_extra_media)
+
+
+@router.message(SuggestCarStates.waiting_for_extra_media, F.photo | F.video)
+async def suggest_extra_media(message: Message, state: FSMContext):
+    """Принимаем доп. фото или видео к предложению"""
     data = await state.get_data()
-    username = message.from_user.username or message.from_user.first_name
+    extra_media = data.get('extra_media', [])
+
+    if len(extra_media) >= 4:
+        await message.answer("⚠️ Максимум 4 доп. медиафайла. Нажми Отправить.")
+        return
+
+    if message.photo:
+        file_id = message.photo[-1].file_id
+        media_type = 'photo'
+    else:
+        file_id = message.video.file_id
+        media_type = 'video'
+
+    extra_media.append({'file_id': file_id, 'media_type': media_type})
+    await state.update_data(extra_media=extra_media)
+
+    remaining = 4 - len(extra_media)
+    builder = InlineKeyboardBuilder()
+    builder.row(InlineKeyboardButton(text="✅ Отправить", callback_data="suggest_submit"))
+    builder.row(InlineKeyboardButton(text="❌ Отмена", callback_data="suggest_menu"))
+
+    icon = "📷" if media_type == 'photo' else "🎥"
+    await message.answer(
+        f"{icon} Добавлено! Всего доп. медиа: {len(extra_media)}/4\n"
+        f"{'Можешь добавить ещё ' + str(remaining) + ' файл(а).' if remaining > 0 else 'Достигнут максимум.'}\n\n"
+        "Отправь ещё или нажми <b>Отправить</b>.",
+        reply_markup=builder.as_markup()
+    )
+
+
+@router.message(SuggestCarStates.waiting_for_extra_media)
+async def suggest_extra_media_invalid(message: Message):
+    await message.answer("❌ Отправь фото или видео, либо нажми Отправить.")
+
+
+@router.callback_query(F.data == "suggest_submit")
+async def suggest_submit(callback: CallbackQuery, state: FSMContext, bot: Bot):
+    """Финальная отправка предложения"""
+    data = await state.get_data()
+    username = callback.from_user.username or callback.from_user.first_name
 
     suggestion_id = await db.create_suggestion(
-        user_id=message.from_user.id,
+        user_id=callback.from_user.id,
         username=username,
         brand=data['brand'],
         model=data['model'],
         year=data.get('year'),
         description=data.get('description'),
-        locations=locations,
+        locations=data.get('locations'),
         photo_id=data['photo_id']
     )
 
+    # Сохраняем доп. медиа
+    for media in data.get('extra_media', []):
+        await db.add_suggestion_media(suggestion_id, media['file_id'], media['media_type'])
+
     await state.clear()
+
+    extra_count = len(data.get('extra_media', []))
+    media_note = f"\n📷 Доп. медиа: {extra_count} файл(а)" if extra_count > 0 else ""
 
     builder = InlineKeyboardBuilder()
     builder.row(InlineKeyboardButton(text="📋 Мои предложения", callback_data="my_suggestions"))
     builder.row(InlineKeyboardButton(text="🔙 Главное меню", callback_data="back_to_main"))
 
-    await message.answer(
-        f"✅ <b>Предложение #{suggestion_id} отправлено!</b>\n\n"
-        f"🚗 {data['brand']} {data['model']}\n\n"
-        f"Мы рассмотрим его в ближайшее время и уведомим тебя о решении.",
-        reply_markup=builder.as_markup()
-    )
+    try:
+        await callback.message.edit_text(
+            f"✅ <b>Предложение #{suggestion_id} отправлено!</b>\n\n"
+            f"🚗 {data['brand']} {data['model']}{media_note}\n\n"
+            f"Мы рассмотрим его в ближайшее время и уведомим тебя о решении.",
+            reply_markup=builder.as_markup()
+        )
+    except:
+        await callback.message.answer(
+            f"✅ <b>Предложение #{suggestion_id} отправлено!</b>\n\n"
+            f"🚗 {data['brand']} {data['model']}{media_note}\n\n"
+            f"Мы рассмотрим его в ближайшее время и уведомим тебя о решении.",
+            reply_markup=builder.as_markup()
+        )
 
     # Уведомляем админов
     for admin_id in ADMIN_IDS:
@@ -197,6 +272,7 @@ async def suggest_locations(message: Message, state: FSMContext, bot: Bot):
                 callback_data=f"admin_review_{suggestion_id}"
             ))
             year_str = f" ({data['year']})" if data.get('year') else ""
+            media_str = f"\n📷 Доп. медиа: {extra_count} файл(а)" if extra_count > 0 else ""
             await bot.send_photo(
                 admin_id,
                 photo=data['photo_id'],
@@ -205,12 +281,15 @@ async def suggest_locations(message: Message, state: FSMContext, bot: Bot):
                     f"👤 От: @{username}\n"
                     f"🚗 {data['brand']} {data['model']}{year_str}\n"
                     f"📝 {data.get('description') or '—'}\n"
-                    f"📍 {locations or '—'}"
+                    f"📍 {data.get('locations') or '—'}"
+                    f"{media_str}"
                 ),
                 reply_markup=admin_builder.as_markup()
             )
         except:
             pass
+
+    await callback.answer()
 
 
 # ============= МОИ ПРЕДЛОЖЕНИЯ =============
@@ -328,6 +407,9 @@ async def admin_review_suggestion(callback: CallbackQuery):
         return
 
     year = f" ({s['year']})" if s.get('year') else ""
+    extra_media = await db.get_suggestion_media(suggestion_id)
+    media_note = f"\n📷 Доп. медиа: {len(extra_media)} файл(а)" if extra_media else ""
+
     caption = (
         f"📸 <b>Предложение #{s['id']}</b>\n\n"
         f"👤 От: @{s['username']} (ID: {s['user_id']})\n"
@@ -335,9 +417,15 @@ async def admin_review_suggestion(callback: CallbackQuery):
         f"📝 {s.get('description') or '—'}\n"
         f"📍 {s.get('locations') or '—'}\n"
         f"📅 {str(s['created_at'])[:16]}"
+        f"{media_note}"
     )
 
     builder = InlineKeyboardBuilder()
+    if extra_media:
+        builder.row(InlineKeyboardButton(
+            text=f"📷 Доп. медиа ({len(extra_media)})",
+            callback_data=f"suggest_media_{suggestion_id}"
+        ))
     builder.row(
         InlineKeyboardButton(text="✅ Одобрить", callback_data=f"suggest_approve_{suggestion_id}"),
         InlineKeyboardButton(text="❌ Отклонить", callback_data=f"suggest_reject_{suggestion_id}")
@@ -354,6 +442,37 @@ async def admin_review_suggestion(callback: CallbackQuery):
         caption=caption,
         reply_markup=builder.as_markup()
     )
+    await callback.answer()
+
+
+@router.callback_query(F.data.startswith("suggest_media_"))
+async def show_suggestion_media(callback: CallbackQuery):
+    """Показать доп. медиа предложения (для админа)"""
+    if not await is_admin(callback.from_user.id):
+        await callback.answer("❌ Нет доступа", show_alert=True)
+        return
+
+    suggestion_id = int(callback.data.split("_")[2])
+    extra_media = await db.get_suggestion_media(suggestion_id)
+    s = await db.get_suggestion(suggestion_id)
+
+    if not extra_media:
+        await callback.answer("📷 Доп. медиа нет", show_alert=True)
+        return
+
+    from aiogram.types import InputMediaPhoto, InputMediaVideo
+
+    media_group = []
+    caption_added = False
+    for item in extra_media:
+        caption = f"📷 Доп. медиа к предложению #{suggestion_id}" if not caption_added else None
+        if item['media_type'] == 'video':
+            media_group.append(InputMediaVideo(media=item['file_id'], caption=caption))
+        else:
+            media_group.append(InputMediaPhoto(media=item['file_id'], caption=caption))
+        caption_added = True
+
+    await callback.message.answer_media_group(media=media_group)
     await callback.answer()
 
 
@@ -387,6 +506,11 @@ async def approve_suggestion(callback: CallbackQuery, bot: Bot):
         author_line = f"\n\n📸 Фото: @{s['username']}"
         new_desc = current_desc + author_line
         await db.update_car(car_id, description=new_desc)
+
+    # Переносим доп. медиа из предложения в car_media
+    suggestion_media = await db.get_suggestion_media(suggestion_id)
+    for media in suggestion_media:
+        await db.add_car_media(car_id, media['file_id'], media['media_type'])
 
     # Обновляем статус предложения
     await db.update_suggestion_status(suggestion_id, 'approved')

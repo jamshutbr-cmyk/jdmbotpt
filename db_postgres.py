@@ -145,6 +145,31 @@ class PostgresDatabase:
                     FOREIGN KEY (car_id) REFERENCES cars(id) ON DELETE CASCADE
                 )
             ''')
+
+            # Таблица дополнительных медиа (фото/видео) для машин
+            await conn.execute('''
+                CREATE TABLE IF NOT EXISTS car_media (
+                    id SERIAL PRIMARY KEY,
+                    car_id INTEGER NOT NULL,
+                    file_id TEXT NOT NULL,
+                    media_type TEXT NOT NULL DEFAULT 'photo',
+                    position INTEGER DEFAULT 0,
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    FOREIGN KEY (car_id) REFERENCES cars(id) ON DELETE CASCADE
+                )
+            ''')
+
+            # Таблица доп. медиа для предложений пользователей
+            await conn.execute('''
+                CREATE TABLE IF NOT EXISTS suggestion_media (
+                    id SERIAL PRIMARY KEY,
+                    suggestion_id INTEGER NOT NULL,
+                    file_id TEXT NOT NULL,
+                    media_type TEXT NOT NULL DEFAULT 'photo',
+                    position INTEGER DEFAULT 0,
+                    FOREIGN KEY (suggestion_id) REFERENCES car_suggestions(id) ON DELETE CASCADE
+                )
+            ''')
             await conn.execute('''
                 INSERT INTO settings (key, value) 
                 VALUES ('welcome_text', '🚗 <b>Добро пожаловать в JDM Cars Bot!</b>\n\nЗдесь ты найдешь крутые тачки, сфотографированные на улицах города.\n\nВыбери действие из меню ниже:')
@@ -608,6 +633,64 @@ class PostgresDatabase:
     async def close(self):
         if self.pool:
             await self.pool.close()
+
+    # ============= МЕДИА МАШИН =============
+
+    async def add_car_media(self, car_id: int, file_id: str, media_type: str = 'photo') -> int:
+        """Добавить медиафайл к машине"""
+        async with self.pool.acquire() as conn:
+            position = await conn.fetchval(
+                'SELECT COALESCE(MAX(position), -1) + 1 FROM car_media WHERE car_id = $1',
+                car_id
+            )
+            return await conn.fetchval('''
+                INSERT INTO car_media (car_id, file_id, media_type, position)
+                VALUES ($1, $2, $3, $4) RETURNING id
+            ''', car_id, file_id, media_type, position)
+
+    async def get_car_media(self, car_id: int) -> List[Dict]:
+        """Получить все медиафайлы машины"""
+        async with self.pool.acquire() as conn:
+            rows = await conn.fetch(
+                'SELECT * FROM car_media WHERE car_id = $1 ORDER BY position ASC',
+                car_id
+            )
+            return [dict(r) for r in rows]
+
+    async def count_car_media(self, car_id: int) -> int:
+        """Количество доп. медиафайлов машины"""
+        async with self.pool.acquire() as conn:
+            return await conn.fetchval(
+                'SELECT COUNT(*) FROM car_media WHERE car_id = $1', car_id
+            )
+
+    async def delete_car_media(self, car_id: int):
+        """Удалить все медиафайлы машины"""
+        async with self.pool.acquire() as conn:
+            await conn.execute('DELETE FROM car_media WHERE car_id = $1', car_id)
+
+    # ============= МЕДИА ПРЕДЛОЖЕНИЙ =============
+
+    async def add_suggestion_media(self, suggestion_id: int, file_id: str, media_type: str = 'photo'):
+        """Добавить медиафайл к предложению"""
+        async with self.pool.acquire() as conn:
+            position = await conn.fetchval(
+                'SELECT COALESCE(MAX(position), -1) + 1 FROM suggestion_media WHERE suggestion_id = $1',
+                suggestion_id
+            )
+            await conn.execute('''
+                INSERT INTO suggestion_media (suggestion_id, file_id, media_type, position)
+                VALUES ($1, $2, $3, $4)
+            ''', suggestion_id, file_id, media_type, position)
+
+    async def get_suggestion_media(self, suggestion_id: int) -> List[Dict]:
+        """Получить все медиафайлы предложения"""
+        async with self.pool.acquire() as conn:
+            rows = await conn.fetch(
+                'SELECT * FROM suggestion_media WHERE suggestion_id = $1 ORDER BY position ASC',
+                suggestion_id
+            )
+            return [dict(r) for r in rows]
 
 
 pg_db = PostgresDatabase()

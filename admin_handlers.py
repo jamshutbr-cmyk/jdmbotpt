@@ -7,7 +7,7 @@ from aiogram.types import InlineKeyboardButton
 from db_adapter import db
 from keyboards import admin_menu_kb, catalog_kb, confirm_delete_kb, cancel_kb, back_to_main_kb, search_results_kb, settings_menu_kb
 from states import AddCarStates, SettingsStates, EditCarStates
-from utils import is_admin, is_owner, add_admin, remove_admin, get_all_admin_ids
+from utils import is_admin, is_owner, add_admin, remove_admin, get_all_admin_ids, format_car_info
 from config import OWNER_ID, ADMIN_IDS
 
 router = Router()
@@ -182,40 +182,113 @@ async def process_description(message: Message, state: FSMContext):
 
 @router.message(AddCarStates.waiting_for_locations)
 async def process_locations(message: Message, state: FSMContext):
-    """Обработка локаций и сохранение"""
+    """Обработка локаций — предлагаем добавить доп. медиа"""
     locations = message.text.strip()
-    
+
     if locations == '-':
         locations = None
-    
-    # Получаем все данные
+
+    await state.update_data(locations=locations, extra_media=[])
+
+    builder = InlineKeyboardBuilder()
+    builder.row(InlineKeyboardButton(text="✅ Сохранить без доп. медиа", callback_data="admin_save_car"))
+    builder.row(InlineKeyboardButton(text="❌ Отмена", callback_data="cancel"))
+
+    await message.answer(
+        "✅ Локации сохранены!\n\n"
+        "📷 <b>Доп. медиа (необязательно)</b>\n\n"
+        "Можешь добавить до 4 дополнительных фото или видео.\n"
+        "Отправляй по одному — фото или видео.\n\n"
+        "Когда закончишь — нажми <b>Сохранить</b>.",
+        reply_markup=builder.as_markup()
+    )
+    await state.set_state(AddCarStates.waiting_for_extra_media)
+
+
+@router.message(AddCarStates.waiting_for_extra_media, F.photo | F.video)
+async def process_extra_media(message: Message, state: FSMContext):
+    """Принимаем доп. фото или видео"""
     data = await state.get_data()
-    
-    # Сохраняем в базу
+    extra_media = data.get('extra_media', [])
+
+    if len(extra_media) >= 4:
+        await message.answer("⚠️ Максимум 4 доп. медиафайла. Нажми Сохранить.")
+        return
+
+    if message.photo:
+        file_id = message.photo[-1].file_id
+        media_type = 'photo'
+    else:
+        file_id = message.video.file_id
+        media_type = 'video'
+
+    extra_media.append({'file_id': file_id, 'media_type': media_type})
+    await state.update_data(extra_media=extra_media)
+
+    remaining = 4 - len(extra_media)
+    builder = InlineKeyboardBuilder()
+    builder.row(InlineKeyboardButton(text="✅ Сохранить", callback_data="admin_save_car"))
+    builder.row(InlineKeyboardButton(text="❌ Отмена", callback_data="cancel"))
+
+    icon = "📷" if media_type == 'photo' else "🎥"
+    await message.answer(
+        f"{icon} Добавлено! Всего доп. медиа: {len(extra_media)}/4\n"
+        f"{'Можешь добавить ещё ' + str(remaining) + ' файл(а).' if remaining > 0 else 'Достигнут максимум.'}\n\n"
+        "Отправь ещё или нажми <b>Сохранить</b>.",
+        reply_markup=builder.as_markup()
+    )
+
+
+@router.message(AddCarStates.waiting_for_extra_media)
+async def process_extra_media_invalid(message: Message):
+    """Неверный тип файла"""
+    await message.answer("❌ Отправь фото или видео, либо нажми Сохранить.")
+
+
+@router.callback_query(F.data == "admin_save_car")
+async def save_car(callback: CallbackQuery, state: FSMContext):
+    """Финальное сохранение машины"""
+    if not await is_admin(callback.from_user.id):
+        await callback.answer("❌ Нет доступа", show_alert=True)
+        return
+
+    data = await state.get_data()
+
+    # Сохраняем основную запись
     car_id = await db.add_car(
         brand=data['brand'],
         model=data['model'],
         year=data.get('year'),
         description=data.get('description'),
-        locations=locations,
+        locations=data.get('locations'),
         photo_id=data['photo_id']
     )
-    
+
+    # Сохраняем доп. медиа
+    for media in data.get('extra_media', []):
+        await db.add_car_media(car_id, media['file_id'], media['media_type'])
+
     await state.clear()
-    
-    # Показываем результат
+
     car = await db.get_car(car_id)
-    text = "✅ <b>Машина успешно добавлена!</b>\n\n" + format_car_info(car, views=False)
-    
-    await message.answer_photo(
+    media_count = len(data.get('extra_media', []))
+    media_note = f"\n📷 Доп. медиа: {media_count} файл(а)" if media_count > 0 else ""
+    text = f"✅ <b>Машина успешно добавлена!</b>{media_note}\n\n" + format_car_info(car, views=False)
+
+    try:
+        await callback.message.delete()
+    except:
+        pass
+
+    await callback.message.answer_photo(
         photo=car['photo_id'],
         caption=text,
         reply_markup=back_to_main_kb()
     )
 
-    # Отправляем уведомления подписчикам
+    # Уведомления подписчикам
     from aiogram import Bot
-    bot: Bot = message.bot
+    bot: Bot = callback.bot
     users = await db.get_users_with_notifications()
     year_str = f" ({car['year']})" if car.get('year') else ""
 
@@ -230,8 +303,8 @@ async def process_locations(message: Message, state: FSMContext):
 
     sent = 0
     for user in users:
-        if user['user_id'] == message.from_user.id:
-            continue  # не отправляем самому себе
+        if user['user_id'] == callback.from_user.id:
+            continue
         try:
             await bot.send_photo(
                 chat_id=user['user_id'],
@@ -246,7 +319,9 @@ async def process_locations(message: Message, state: FSMContext):
             pass
 
     if sent > 0:
-        await message.answer(f"📢 Уведомление отправлено {sent} подписчикам!")
+        await callback.message.answer(f"📢 Уведомление отправлено {sent} подписчикам!")
+
+    await callback.answer()
 
 
 # ============= РЕДАКТИРОВАНИЕ =============

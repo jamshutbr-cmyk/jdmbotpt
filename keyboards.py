@@ -96,7 +96,7 @@ def settings_menu_kb() -> InlineKeyboardMarkup:
     return builder.as_markup()
 
 
-def car_navigation_kb(current_index: int, total_cars: int, car_id: int, is_favorite: bool = False, is_admin: bool = False, user_rating: int = None, rating_stats: Dict = None) -> InlineKeyboardMarkup:
+def car_navigation_kb(current_index: int, total_cars: int, car_id: int, is_favorite: bool = False, is_admin: bool = False, user_rating: int = None, rating_stats: Dict = None, has_media: bool = False, bot_username: str = None) -> InlineKeyboardMarkup:
     """Клавиатура навигации по машинам"""
     builder = InlineKeyboardBuilder()
     
@@ -122,6 +122,17 @@ def car_navigation_kb(current_index: int, total_cars: int, car_id: int, is_favor
     builder.row(
         InlineKeyboardButton(text=fav_text, callback_data=f"fav_{car_id}")
     )
+
+    # Доп. медиа и поделиться
+    extra_row = []
+    if has_media:
+        extra_row.append(InlineKeyboardButton(text="📷 Медиа", callback_data=f"media_{car_id}"))
+    if bot_username:
+        extra_row.append(InlineKeyboardButton(text="🔗 Поделиться", url=f"https://t.me/share/url?url=t.me/{bot_username}%3Fstart%3Dcar_{car_id}"))
+    else:
+        extra_row.append(InlineKeyboardButton(text="🔗 Поделиться", callback_data=f"share_{car_id}"))
+    if extra_row:
+        builder.row(*extra_row)
     
     # Навигация
     nav_buttons = []
@@ -214,7 +225,8 @@ def top_cars_list_kb(top_cars: list) -> InlineKeyboardMarkup:
 
 
 def top_car_detail_kb(car_id: int, is_favorite: bool = False, is_admin: bool = False,
-                      user_rating: int = None, rating_stats: Dict = None) -> InlineKeyboardMarkup:
+                      user_rating: int = None, rating_stats: Dict = None,
+                      has_media: bool = False, bot_username: str = None) -> InlineKeyboardMarkup:
     """Клавиатура карточки машины из топа"""
     builder = InlineKeyboardBuilder()
 
@@ -236,6 +248,16 @@ def top_car_detail_kb(car_id: int, is_favorite: bool = False, is_admin: bool = F
 
     fav_text = "💔 Убрать из избранного" if is_favorite else "❤️ В избранное"
     builder.row(InlineKeyboardButton(text=fav_text, callback_data=f"fav_{car_id}"))
+
+    extra_row = []
+    if has_media:
+        extra_row.append(InlineKeyboardButton(text="📷 Медиа", callback_data=f"media_{car_id}"))
+    if bot_username:
+        extra_row.append(InlineKeyboardButton(text="🔗 Поделиться", url=f"https://t.me/share/url?url=t.me/{bot_username}%3Fstart%3Dcar_{car_id}"))
+    else:
+        extra_row.append(InlineKeyboardButton(text="🔗 Поделиться", callback_data=f"share_{car_id}"))
+    if extra_row:
+        builder.row(*extra_row)
 
     if is_admin:
         builder.row(

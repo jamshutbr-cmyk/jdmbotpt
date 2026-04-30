@@ -135,6 +135,31 @@ class Database:
                     FOREIGN KEY (car_id) REFERENCES cars(id) ON DELETE CASCADE
                 )
             ''')
+
+            # Таблица дополнительных медиа (фото/видео) для машин
+            await db.execute('''
+                CREATE TABLE IF NOT EXISTS car_media (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    car_id INTEGER NOT NULL,
+                    file_id TEXT NOT NULL,
+                    media_type TEXT NOT NULL DEFAULT 'photo',
+                    position INTEGER DEFAULT 0,
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    FOREIGN KEY (car_id) REFERENCES cars(id) ON DELETE CASCADE
+                )
+            ''')
+
+            # Таблица доп. медиа для предложений пользователей
+            await db.execute('''
+                CREATE TABLE IF NOT EXISTS suggestion_media (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    suggestion_id INTEGER NOT NULL,
+                    file_id TEXT NOT NULL,
+                    media_type TEXT NOT NULL DEFAULT 'photo',
+                    position INTEGER DEFAULT 0,
+                    FOREIGN KEY (suggestion_id) REFERENCES car_suggestions(id) ON DELETE CASCADE
+                )
+            ''')
             await db.execute('''
                 INSERT OR IGNORE INTO settings (key, value) 
                 VALUES ('welcome_text', '🚗 <b>Добро пожаловать в JDM Cars Bot!</b>\n\nЗдесь ты найдешь крутые тачки, сфотографированные на улицах города.\n\nВыбери действие из меню ниже:')
@@ -672,6 +697,76 @@ class Database:
                 'total_dislikes': total_dislikes,
                 'user_score': total_likes - total_dislikes
             }
+
+    # ============= МЕДИА МАШИН =============
+
+    async def add_car_media(self, car_id: int, file_id: str, media_type: str = 'photo') -> int:
+        """Добавить медиафайл к машине"""
+        async with aiosqlite.connect(self.db_path) as db:
+            # Определяем следующую позицию
+            cursor = await db.execute(
+                'SELECT COALESCE(MAX(position), -1) + 1 FROM car_media WHERE car_id = ?',
+                (car_id,)
+            )
+            position = (await cursor.fetchone())[0]
+            cursor = await db.execute('''
+                INSERT INTO car_media (car_id, file_id, media_type, position)
+                VALUES (?, ?, ?, ?)
+            ''', (car_id, file_id, media_type, position))
+            await db.commit()
+            return cursor.lastrowid
+
+    async def get_car_media(self, car_id: int) -> List[Dict]:
+        """Получить все медиафайлы машины"""
+        async with aiosqlite.connect(self.db_path) as db:
+            db.row_factory = aiosqlite.Row
+            cursor = await db.execute('''
+                SELECT * FROM car_media WHERE car_id = ?
+                ORDER BY position ASC
+            ''', (car_id,))
+            rows = await cursor.fetchall()
+            return [dict(r) for r in rows]
+
+    async def count_car_media(self, car_id: int) -> int:
+        """Количество доп. медиафайлов машины"""
+        async with aiosqlite.connect(self.db_path) as db:
+            cursor = await db.execute(
+                'SELECT COUNT(*) FROM car_media WHERE car_id = ?', (car_id,)
+            )
+            return (await cursor.fetchone())[0]
+
+    async def delete_car_media(self, car_id: int):
+        """Удалить все медиафайлы машины"""
+        async with aiosqlite.connect(self.db_path) as db:
+            await db.execute('DELETE FROM car_media WHERE car_id = ?', (car_id,))
+            await db.commit()
+
+    # ============= МЕДИА ПРЕДЛОЖЕНИЙ =============
+
+    async def add_suggestion_media(self, suggestion_id: int, file_id: str, media_type: str = 'photo'):
+        """Добавить медиафайл к предложению"""
+        async with aiosqlite.connect(self.db_path) as db:
+            cursor = await db.execute(
+                'SELECT COALESCE(MAX(position), -1) + 1 FROM suggestion_media WHERE suggestion_id = ?',
+                (suggestion_id,)
+            )
+            position = (await cursor.fetchone())[0]
+            await db.execute('''
+                INSERT INTO suggestion_media (suggestion_id, file_id, media_type, position)
+                VALUES (?, ?, ?, ?)
+            ''', (suggestion_id, file_id, media_type, position))
+            await db.commit()
+
+    async def get_suggestion_media(self, suggestion_id: int) -> List[Dict]:
+        """Получить все медиафайлы предложения"""
+        async with aiosqlite.connect(self.db_path) as db:
+            db.row_factory = aiosqlite.Row
+            cursor = await db.execute(
+                'SELECT * FROM suggestion_media WHERE suggestion_id = ? ORDER BY position ASC',
+                (suggestion_id,)
+            )
+            rows = await cursor.fetchall()
+            return [dict(r) for r in rows]
 
 
 db = Database()

@@ -8,6 +8,7 @@ class AddCarStates(StatesGroup):
     waiting_for_year = State()
     waiting_for_description = State()
     waiting_for_locations = State()
+    waiting_for_extra_media = State()  # доп. фото/видео (до 4 штук)
 
 
 class SearchStates(StatesGroup):
@@ -47,6 +48,7 @@ class SuggestCarStates(StatesGroup):
     waiting_for_year = State()
     waiting_for_description = State()
     waiting_for_locations = State()
+    waiting_for_extra_media = State()  # доп. фото/видео (до 4 штук)
 
 
 class AdminRejectStates(StatesGroup):

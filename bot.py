@@ -33,6 +33,9 @@ logger = logging.getLogger(__name__)
 bot = Bot(token=BOT_TOKEN, default=DefaultBotProperties(parse_mode=ParseMode.HTML))
 dp = Dispatcher()
 
+# Кэш username бота (заполняется при старте)
+_bot_username: str = None
+
 # Подключаем обработчики
 dp.include_router(admin_handlers.router)
 dp.include_router(support_handlers.router)
@@ -53,12 +56,44 @@ CARS_PER_PAGE = 6
 @dp.message(Command("start"))
 async def cmd_start(message: Message):
     """Команда /start"""
+    global _bot_username
+
     # Регистрируем пользователя
     await db.register_user(
         message.from_user.id,
         message.from_user.username or '',
         message.from_user.first_name or ''
     )
+
+    # Получаем username бота если ещё не знаем
+    if not _bot_username:
+        bot_info = await bot.get_me()
+        _bot_username = bot_info.username
+
+    # Обработка deep link: /start car_123
+    args = message.text.split(maxsplit=1)
+    if len(args) > 1 and args[1].startswith("car_"):
+        try:
+            car_id = int(args[1].split("_")[1])
+            car = await db.get_car(car_id)
+            if car:
+                await db.increment_views(car_id, message.from_user.id)
+                is_fav = await db.is_favorite(message.from_user.id, car_id)
+                is_adm = await is_admin(message.from_user.id)
+                user_rating = await db.get_car_rating(message.from_user.id, car_id)
+                rating_stats = await db.get_car_rating_stats(car_id)
+                has_media = await db.count_car_media(car_id) > 0
+                text = format_car_info(car, rating_stats=rating_stats)
+                if len(text) > 1024:
+                    text = text[:1020] + "..."
+                await message.answer_photo(
+                    photo=car['photo_id'],
+                    caption=text,
+                    reply_markup=car_navigation_kb(0, 1, car_id, is_fav, is_adm, user_rating, rating_stats, has_media, _bot_username)
+                )
+                return
+        except (ValueError, IndexError):
+            pass
 
     welcome_text = await db.get_setting('welcome_text')
     if not welcome_text:
@@ -205,6 +240,7 @@ async def show_catalog(callback: CallbackQuery):
     is_adm = await is_admin(callback.from_user.id)
     user_rating = await db.get_car_rating(callback.from_user.id, car['id'])
     rating_stats = await db.get_car_rating_stats(car['id'])
+    has_media = await db.count_car_media(car['id']) > 0
     
     text = format_car_info(car, rating_stats=rating_stats)
     # Жёсткая обрезка прямо перед отправкой
@@ -221,13 +257,13 @@ async def show_catalog(callback: CallbackQuery):
         await callback.message.answer_photo(
             photo=car['photo_id'],
             caption=text,
-            reply_markup=car_navigation_kb(current_index, len(all_cars), car['id'], is_fav, is_adm, user_rating, rating_stats)
+            reply_markup=car_navigation_kb(current_index, len(all_cars), car['id'], is_fav, is_adm, user_rating, rating_stats, has_media, _bot_username)
         )
     except Exception as e:
         logger.error(f"Ошибка отправки фото: {e}")
         await callback.message.answer(
             text,
-            reply_markup=car_navigation_kb(current_index, len(all_cars), car['id'], is_fav, is_adm, user_rating, rating_stats)
+            reply_markup=car_navigation_kb(current_index, len(all_cars), car['id'], is_fav, is_adm, user_rating, rating_stats, has_media, _bot_username)
         )
     await callback.answer()
 
@@ -702,6 +738,7 @@ async def show_top_car(callback: CallbackQuery):
     is_adm = await is_admin(callback.from_user.id)
     user_rating = await db.get_car_rating(callback.from_user.id, car_id)
     rating_stats = await db.get_car_rating_stats(car_id)
+    has_media = await db.count_car_media(car_id) > 0
 
     medals = {1: "🥇", 2: "🥈", 3: "🥉"}
     medal = medals.get(place, f"#{place}")
@@ -718,7 +755,7 @@ async def show_top_car(callback: CallbackQuery):
         await callback.message.answer_photo(
             photo=car['photo_id'],
             caption=text,
-            reply_markup=top_car_detail_kb(car_id, is_fav, is_adm, user_rating, rating_stats)
+            reply_markup=top_car_detail_kb(car_id, is_fav, is_adm, user_rating, rating_stats, has_media, _bot_username)
         )
     except Exception as e:
         logger.error(f"Ошибка отправки фото топ-машины: {e}")
@@ -763,6 +800,62 @@ async def show_my_rating(callback: CallbackQuery):
     await callback.answer()
 
 
+# ============= МЕДИА АЛЬБОМ =============
+
+@dp.callback_query(F.data.startswith("media_"))
+async def show_car_media(callback: CallbackQuery):
+    """Показать доп. медиа машины (альбом)"""
+    car_id = int(callback.data.split("_")[1])
+    media_list = await db.get_car_media(car_id)
+    car = await db.get_car(car_id)
+
+    if not media_list:
+        await callback.answer("📷 Доп. медиа нет", show_alert=True)
+        return
+
+    if not car:
+        await callback.answer("❌ Машина не найдена", show_alert=True)
+        return
+
+    from aiogram.types import InputMediaPhoto, InputMediaVideo
+
+    # Формируем медиагруппу
+    media_group = []
+    caption_added = False
+    for item in media_list:
+        caption = f"📷 {car['brand']} {car['model']} — доп. медиа" if not caption_added else None
+        if item['media_type'] == 'video':
+            media_group.append(InputMediaVideo(media=item['file_id'], caption=caption))
+        else:
+            media_group.append(InputMediaPhoto(media=item['file_id'], caption=caption))
+        caption_added = True
+
+    builder = InlineKeyboardBuilder()
+    builder.row(InlineKeyboardButton(text="🔙 К карточке", callback_data=f"car_{car_id}"))
+
+    await callback.message.answer_media_group(media=media_group)
+    await callback.message.answer(
+        f"📷 Доп. медиа: {len(media_list)} файл(а)\n🚗 {car['brand']} {car['model']}",
+        reply_markup=builder.as_markup()
+    )
+    await callback.answer()
+
+
+# ============= ПОДЕЛИТЬСЯ =============
+
+@dp.callback_query(F.data.startswith("share_"))
+async def share_car(callback: CallbackQuery):
+    """Показать ссылку для шаринга (если bot_username ещё не загружен)"""
+    car_id = int(callback.data.split("_")[1])
+    global _bot_username
+    if not _bot_username:
+        bot_info = await bot.get_me()
+        _bot_username = bot_info.username
+
+    link = f"https://t.me/{_bot_username}?start=car_{car_id}"
+    await callback.answer(f"🔗 {link}", show_alert=True)
+
+
 # ============= ОТМЕНА =============
 
 @dp.callback_query(F.data == "cancel")
@@ -777,6 +870,12 @@ async def main():
     # Инициализация базы данных
     await db.init_db()
     logger.info("База данных инициализирована")
+
+    # Получаем username бота
+    global _bot_username
+    bot_info = await bot.get_me()
+    _bot_username = bot_info.username
+    logger.info(f"Бот: @{_bot_username}")
     
     # Запуск бота
     logger.info("Бот запущен")
