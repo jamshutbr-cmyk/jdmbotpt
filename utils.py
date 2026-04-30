@@ -82,7 +82,7 @@ async def remove_admin(user_id: int) -> str:
         return 'error'
 
 
-def format_car_info(car: Dict, views: bool = True) -> str:
+def format_car_info(car: Dict, views: bool = True, rating_stats: Dict = None) -> str:
     text = f"🚗 <b>{car['brand']} {car['model']}</b>\n\n"
 
     if car.get('year'):
@@ -100,6 +100,13 @@ def format_car_info(car: Dict, views: bool = True) -> str:
             loc = loc[:100] + "..."
         text += f"\n📍 {loc}\n"
 
+    # Рейтинг
+    if rating_stats:
+        likes = rating_stats.get('likes', 0)
+        dislikes = rating_stats.get('dislikes', 0)
+        if likes > 0 or dislikes > 0:
+            text += f"\n👍 {likes}  👎 {dislikes}"
+
     if views and car.get('views'):
         text += f"\n👁 Просмотров: {car['views']}"
 
@@ -116,7 +123,13 @@ def format_stats(stats: Dict) -> str:
 
     if stats['total_cars'] > 0:
         avg_views = stats['total_views'] / stats['total_cars']
-        text += f"📈 Среднее просмотров на машину: {avg_views:.1f}"
+        text += f"📈 Среднее просмотров на машину: {avg_views:.1f}\n"
+    
+    # Добавляем рейтинговую статистику
+    text += f"\n🏆 <b>Рейтинговая система:</b>\n"
+    text += f"👍 Всего лайков: {stats.get('total_likes', 0)}\n"
+    text += f"👎 Всего дизлайков: {stats.get('total_dislikes', 0)}\n"
+    text += f"⭐ Машин с рейтингом: {stats.get('rated_cars', 0)}"
 
     return text
 

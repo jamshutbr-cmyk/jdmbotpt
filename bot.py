@@ -145,6 +145,7 @@ async def more_menu(callback: CallbackQuery):
         await callback.message.delete()
         await callback.message.answer(text, reply_markup=more_menu_kb())
     await callback.answer()
+@dp.callback_query(F.data == "about")
 async def about_bot(callback: CallbackQuery):
     """О боте"""
     bot_name = await db.get_setting('bot_name') or 'JDM Cars Bot'
@@ -198,11 +199,13 @@ async def show_catalog(callback: CallbackQuery):
     # Увеличиваем счетчик просмотров
     await db.increment_views(car['id'], callback.from_user.id)
     
-    # Проверяем избранное
+    # Проверяем избранное и рейтинг
     is_fav = await db.is_favorite(callback.from_user.id, car['id'])
     is_adm = await is_admin(callback.from_user.id)
+    user_rating = await db.get_car_rating(callback.from_user.id, car['id'])
+    rating_stats = await db.get_car_rating_stats(car['id'])
     
-    text = format_car_info(car)
+    text = format_car_info(car, rating_stats=rating_stats)
     # Жёсткая обрезка прямо перед отправкой
     if len(text) > 1024:
         text = text[:1020] + "..."
@@ -217,13 +220,13 @@ async def show_catalog(callback: CallbackQuery):
         await callback.message.answer_photo(
             photo=car['photo_id'],
             caption=text,
-            reply_markup=car_navigation_kb(current_index, len(all_cars), car['id'], is_fav, is_adm)
+            reply_markup=car_navigation_kb(current_index, len(all_cars), car['id'], is_fav, is_adm, user_rating, rating_stats)
         )
     except Exception as e:
         logger.error(f"Ошибка отправки фото: {e}")
         await callback.message.answer(
             text,
-            reply_markup=car_navigation_kb(current_index, len(all_cars), car['id'], is_fav, is_adm)
+            reply_markup=car_navigation_kb(current_index, len(all_cars), car['id'], is_fav, is_adm, user_rating, rating_stats)
         )
     await callback.answer()
 
@@ -241,14 +244,33 @@ async def show_car(callback: CallbackQuery):
     # Увеличиваем счетчик просмотров
     await db.increment_views(car_id, callback.from_user.id)
     
-    # Проверяем, в избранном ли
+    # Проверяем, в избранном ли и рейтинг
     is_fav = await db.is_favorite(callback.from_user.id, car_id)
     is_adm = await is_admin(callback.from_user.id)
+    user_rating = await db.get_car_rating(callback.from_user.id, car_id)
+    rating_stats = await db.get_car_rating_stats(car_id)
     
-    text = format_car_info(car)
+    text = format_car_info(car, rating_stats=rating_stats)
     
     # Отправляем фото с описанием (без навигации, т.к. из поиска)
     builder = InlineKeyboardBuilder()
+    
+    # Кнопки рейтинга
+    likes = rating_stats.get('likes', 0)
+    dislikes = rating_stats.get('dislikes', 0)
+    
+    like_text = "👍" if user_rating != 1 else "👍✅"
+    dislike_text = "👎" if user_rating != -1 else "👎✅"
+    
+    if likes > 0:
+        like_text += f" {likes}"
+    if dislikes > 0:
+        dislike_text += f" {dislikes}"
+    
+    builder.row(
+        InlineKeyboardButton(text=like_text, callback_data=f"rate_like_{car_id}"),
+        InlineKeyboardButton(text=dislike_text, callback_data=f"rate_dislike_{car_id}")
+    )
     
     fav_text = "💔 Убрать из избранного" if is_fav else "❤️ В избранное"
     builder.row(InlineKeyboardButton(text=fav_text, callback_data=f"fav_{car_id}"))
@@ -299,13 +321,34 @@ async def toggle_favorite(callback: CallbackQuery):
                 break
         
         is_adm = await is_admin(user_id)
+        user_rating = await db.get_car_rating(user_id, car_id)
+        rating_stats = await db.get_car_rating_stats(car_id)
         await callback.message.edit_reply_markup(
-            reply_markup=car_navigation_kb(current_index, len(all_cars), car_id, not is_fav, is_adm)
+            reply_markup=car_navigation_kb(current_index, len(all_cars), car_id, not is_fav, is_adm, user_rating, rating_stats)
         )
     else:
         # Это из поиска - простая клавиатура
         is_adm = await is_admin(user_id)
+        user_rating = await db.get_car_rating(user_id, car_id)
+        rating_stats = await db.get_car_rating_stats(car_id)
         builder = InlineKeyboardBuilder()
+        
+        # Кнопки рейтинга
+        likes = rating_stats.get('likes', 0)
+        dislikes = rating_stats.get('dislikes', 0)
+        
+        like_text = "👍" if user_rating != 1 else "👍✅"
+        dislike_text = "👎" if user_rating != -1 else "👎✅"
+        
+        if likes > 0:
+            like_text += f" {likes}"
+        if dislikes > 0:
+            dislike_text += f" {dislikes}"
+        
+        builder.row(
+            InlineKeyboardButton(text=like_text, callback_data=f"rate_like_{car_id}"),
+            InlineKeyboardButton(text=dislike_text, callback_data=f"rate_dislike_{car_id}")
+        )
         
         fav_text = "💔 Убрать из избранного" if not is_fav else "❤️ В избранное"
         builder.row(InlineKeyboardButton(text=fav_text, callback_data=f"fav_{car_id}"))
@@ -348,8 +391,10 @@ async def show_favorites(callback: CallbackQuery):
     
     is_fav = True  # Точно в избранном
     is_adm = await is_admin(callback.from_user.id)
+    user_rating = await db.get_car_rating(callback.from_user.id, car['id'])
+    rating_stats = await db.get_car_rating_stats(car['id'])
     
-    text = "⭐ <b>Избранное</b>\n\n" + format_car_info(car)
+    text = "⭐ <b>Избранное</b>\n\n" + format_car_info(car, rating_stats=rating_stats)
     
     try:
         await callback.message.delete()
@@ -359,7 +404,7 @@ async def show_favorites(callback: CallbackQuery):
     await callback.message.answer_photo(
         photo=car['photo_id'],
         caption=text,
-        reply_markup=car_navigation_kb(0, len(favorites), car['id'], is_fav, is_adm)
+        reply_markup=car_navigation_kb(0, len(favorites), car['id'], is_fav, is_adm, user_rating, rating_stats)
     )
     await callback.answer()
 
@@ -482,6 +527,186 @@ async def show_stats(callback: CallbackQuery):
     """Показать статистику"""
     stats = await db.get_stats()
     text = format_stats(stats)
+
+    builder = InlineKeyboardBuilder()
+    builder.row(InlineKeyboardButton(text="🔙 Назад", callback_data="more_menu"))
+
+    try:
+        await callback.message.edit_text(text, reply_markup=builder.as_markup())
+    except:
+        await callback.message.delete()
+        await callback.message.answer(text, reply_markup=builder.as_markup())
+
+    await callback.answer()
+
+
+# ============= РЕЙТИНГОВАЯ СИСТЕМА =============
+
+@dp.callback_query(F.data.startswith("rate_like_"))
+async def rate_like(callback: CallbackQuery):
+    """Поставить лайк машине"""
+    car_id = int(callback.data.split("_")[2])
+    user_id = callback.from_user.id
+    
+    # Получаем текущий рейтинг пользователя
+    current_rating = await db.get_car_rating(user_id, car_id)
+    
+    if current_rating == 1:
+        # Убираем лайк
+        await db.remove_car_rating(user_id, car_id)
+        await callback.answer("👍 Лайк убран")
+    else:
+        # Ставим лайк (или меняем дизлайк на лайк)
+        await db.set_car_rating(user_id, car_id, 1)
+        await callback.answer("👍 Лайк поставлен!")
+    
+    # Обновляем клавиатуру
+    await update_rating_keyboard(callback, car_id, user_id)
+
+
+@dp.callback_query(F.data.startswith("rate_dislike_"))
+async def rate_dislike(callback: CallbackQuery):
+    """Поставить дизлайк машине"""
+    car_id = int(callback.data.split("_")[2])
+    user_id = callback.from_user.id
+    
+    # Получаем текущий рейтинг пользователя
+    current_rating = await db.get_car_rating(user_id, car_id)
+    
+    if current_rating == -1:
+        # Убираем дизлайк
+        await db.remove_car_rating(user_id, car_id)
+        await callback.answer("👎 Дизлайк убран")
+    else:
+        # Ставим дизлайк (или меняем лайк на дизлайк)
+        await db.set_car_rating(user_id, car_id, -1)
+        await callback.answer("👎 Дизлайк поставлен")
+    
+    # Обновляем клавиатуру
+    await update_rating_keyboard(callback, car_id, user_id)
+
+
+async def update_rating_keyboard(callback: CallbackQuery, car_id: int, user_id: int):
+    """Обновить клавиатуру с рейтингом"""
+    user_rating = await db.get_car_rating(user_id, car_id)
+    rating_stats = await db.get_car_rating_stats(car_id)
+    is_fav = await db.is_favorite(user_id, car_id)
+    is_adm = await is_admin(user_id)
+    
+    # Проверяем, есть ли навигация (из каталога или из поиска)
+    if callback.message.reply_markup and len(callback.message.reply_markup.inline_keyboard) > 3:
+        # Это из каталога с навигацией
+        all_cars = await db.get_all_cars(limit=1000)
+        current_index = 0
+        for i, car in enumerate(all_cars):
+            if car['id'] == car_id:
+                current_index = i
+                break
+        
+        await callback.message.edit_reply_markup(
+            reply_markup=car_navigation_kb(current_index, len(all_cars), car_id, is_fav, is_adm, user_rating, rating_stats)
+        )
+    else:
+        # Это из поиска - простая клавиатура
+        builder = InlineKeyboardBuilder()
+        
+        # Кнопки рейтинга
+        likes = rating_stats.get('likes', 0)
+        dislikes = rating_stats.get('dislikes', 0)
+        
+        like_text = "👍" if user_rating != 1 else "👍✅"
+        dislike_text = "👎" if user_rating != -1 else "👎✅"
+        
+        if likes > 0:
+            like_text += f" {likes}"
+        if dislikes > 0:
+            dislike_text += f" {dislikes}"
+        
+        builder.row(
+            InlineKeyboardButton(text=like_text, callback_data=f"rate_like_{car_id}"),
+            InlineKeyboardButton(text=dislike_text, callback_data=f"rate_dislike_{car_id}")
+        )
+        
+        fav_text = "💔 Убрать из избранного" if is_fav else "❤️ В избранное"
+        builder.row(InlineKeyboardButton(text=fav_text, callback_data=f"fav_{car_id}"))
+        
+        if is_adm:
+            builder.row(
+                InlineKeyboardButton(text="✏️ Редактировать", callback_data=f"edit_{car_id}"),
+                InlineKeyboardButton(text="🗑️ Удалить", callback_data=f"delete_{car_id}")
+            )
+        
+        builder.row(InlineKeyboardButton(text="🔙 Главное меню", callback_data="back_to_main"))
+        
+        await callback.message.edit_reply_markup(reply_markup=builder.as_markup())
+
+
+@dp.callback_query(F.data == "top_cars")
+async def show_top_cars(callback: CallbackQuery):
+    """Показать топ машин по рейтингу"""
+    top_cars = await db.get_top_rated_cars(limit=10)
+    
+    if not top_cars:
+        text = (
+            "🏆 <b>Топ машин</b>\n\n"
+            "Пока нет машин с рейтингом.\n\n"
+            "Ставьте лайки и дизлайки машинам, "
+            "чтобы сформировать топ!"
+        )
+        try:
+            await callback.message.edit_text(text, reply_markup=back_to_main_kb())
+        except:
+            await callback.message.delete()
+            await callback.message.answer(text, reply_markup=back_to_main_kb())
+        await callback.answer()
+        return
+    
+    # Показываем первую машину из топа
+    car = top_cars[0]
+    
+    await db.increment_views(car['id'], callback.from_user.id)
+    
+    is_fav = await db.is_favorite(callback.from_user.id, car['id'])
+    is_adm = await is_admin(callback.from_user.id)
+    user_rating = await db.get_car_rating(callback.from_user.id, car['id'])
+    rating_stats = await db.get_car_rating_stats(car['id'])
+    
+    text = f"🏆 <b>Топ машин</b> (#{1})\n\n" + format_car_info(car, rating_stats=rating_stats)
+    
+    try:
+        await callback.message.delete()
+    except:
+        pass
+    
+    await callback.message.answer_photo(
+        photo=car['photo_id'],
+        caption=text,
+        reply_markup=car_navigation_kb(0, len(top_cars), car['id'], is_fav, is_adm, user_rating, rating_stats)
+    )
+    await callback.answer()
+
+
+@dp.callback_query(F.data == "my_rating")
+async def show_my_rating(callback: CallbackQuery):
+    """Показать рейтинг пользователя"""
+    user_stats = await db.get_user_rating_stats(callback.from_user.id)
+    
+    text = (
+        f"👤 <b>Твой рейтинг</b>\n\n"
+        f"📸 Одобренных предложений: {user_stats['approved_suggestions']}\n"
+        f"👍 Лайков на твоих машинах: {user_stats['total_likes']}\n"
+        f"👎 Дизлайков на твоих машинах: {user_stats['total_dislikes']}\n"
+        f"⭐ Общий рейтинг: {user_stats['user_score']}\n\n"
+    )
+    
+    if user_stats['approved_suggestions'] == 0:
+        text += "💡 Предлагай крутые машины, чтобы повысить свой рейтинг!"
+    elif user_stats['user_score'] > 10:
+        text += "🔥 Отличный рейтинг! Ты настоящий спец по JDM!"
+    elif user_stats['user_score'] > 0:
+        text += "👍 Хороший рейтинг! Продолжай в том же духе!"
+    else:
+        text += "📈 Предлагай больше качественных машин для роста рейтинга!"
 
     builder = InlineKeyboardBuilder()
     builder.row(InlineKeyboardButton(text="🔙 Назад", callback_data="more_menu"))

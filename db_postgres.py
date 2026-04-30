@@ -133,6 +133,18 @@ class PostgresDatabase:
                     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
                 )
             ''')
+            
+            # Таблица лайков/дизлайков машин
+            await conn.execute('''
+                CREATE TABLE IF NOT EXISTS car_ratings (
+                    user_id BIGINT,
+                    car_id INTEGER,
+                    rating INTEGER NOT NULL CHECK (rating IN (-1, 1)),
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    PRIMARY KEY (user_id, car_id),
+                    FOREIGN KEY (car_id) REFERENCES cars(id) ON DELETE CASCADE
+                )
+            ''')
             await conn.execute('''
                 INSERT INTO settings (key, value) 
                 VALUES ('welcome_text', '🚗 <b>Добро пожаловать в JDM Cars Bot!</b>\n\nЗдесь ты найдешь крутые тачки, сфотографированные на улицах города.\n\nВыбери действие из меню ниже:')
@@ -239,9 +251,17 @@ class PostgresDatabase:
             total_cars = await conn.fetchval('SELECT COUNT(*) FROM cars')
             total_views = await conn.fetchval('SELECT COALESCE(SUM(views), 0) FROM cars')
             
+            # Рейтинговая статистика
+            total_likes = await conn.fetchval('SELECT COUNT(*) FROM car_ratings WHERE rating = 1') or 0
+            total_dislikes = await conn.fetchval('SELECT COUNT(*) FROM car_ratings WHERE rating = -1') or 0
+            rated_cars = await conn.fetchval('SELECT COUNT(DISTINCT car_id) FROM car_ratings') or 0
+            
             return {
                 'total_cars': total_cars,
-                'total_views': total_views
+                'total_views': total_views,
+                'total_likes': total_likes,
+                'total_dislikes': total_dislikes,
+                'rated_cars': rated_cars
             }
 
     # Избранное
@@ -485,6 +505,105 @@ class PostgresDatabase:
                 UPDATE required_channels SET is_active = CASE WHEN is_active = 1 THEN 0 ELSE 1 END
                 WHERE id = $1
             ''', channel_id)
+
+    # ============= РЕЙТИНГОВАЯ СИСТЕМА =============
+
+    async def set_car_rating(self, user_id: int, car_id: int, rating: int):
+        """Поставить лайк (1) или дизлайк (-1) машине"""
+        async with self.pool.acquire() as conn:
+            await conn.execute('''
+                INSERT INTO car_ratings (user_id, car_id, rating)
+                VALUES ($1, $2, $3)
+                ON CONFLICT (user_id, car_id) DO UPDATE SET rating = $3, created_at = CURRENT_TIMESTAMP
+            ''', user_id, car_id, rating)
+
+    async def get_car_rating(self, user_id: int, car_id: int) -> Optional[int]:
+        """Получить рейтинг пользователя для машины"""
+        async with self.pool.acquire() as conn:
+            row = await conn.fetchrow('''
+                SELECT rating FROM car_ratings WHERE user_id = $1 AND car_id = $2
+            ''', user_id, car_id)
+            return row['rating'] if row else None
+
+    async def remove_car_rating(self, user_id: int, car_id: int):
+        """Убрать рейтинг (отменить лайк/дизлайк)"""
+        async with self.pool.acquire() as conn:
+            await conn.execute('''
+                DELETE FROM car_ratings WHERE user_id = $1 AND car_id = $2
+            ''', user_id, car_id)
+
+    async def get_car_rating_stats(self, car_id: int) -> Dict:
+        """Получить статистику рейтинга машины"""
+        async with self.pool.acquire() as conn:
+            row = await conn.fetchrow('''
+                SELECT 
+                    COUNT(CASE WHEN rating = 1 THEN 1 END) as likes,
+                    COUNT(CASE WHEN rating = -1 THEN 1 END) as dislikes,
+                    COUNT(*) as total_ratings
+                FROM car_ratings WHERE car_id = $1
+            ''', car_id)
+            if row:
+                likes, dislikes, total = row['likes'], row['dislikes'], row['total_ratings']
+                score = likes - dislikes
+                return {
+                    'likes': likes,
+                    'dislikes': dislikes,
+                    'total_ratings': total,
+                    'score': score
+                }
+            return {'likes': 0, 'dislikes': 0, 'total_ratings': 0, 'score': 0}
+
+    async def get_top_rated_cars(self, limit: int = 10) -> List[Dict]:
+        """Получить топ машин по рейтингу"""
+        async with self.pool.acquire() as conn:
+            rows = await conn.fetch('''
+                SELECT c.*, 
+                       COALESCE(r.likes, 0) as likes,
+                       COALESCE(r.dislikes, 0) as dislikes,
+                       COALESCE(r.score, 0) as score
+                FROM cars c
+                LEFT JOIN (
+                    SELECT car_id,
+                           COUNT(CASE WHEN rating = 1 THEN 1 END) as likes,
+                           COUNT(CASE WHEN rating = -1 THEN 1 END) as dislikes,
+                           COUNT(CASE WHEN rating = 1 THEN 1 END) - COUNT(CASE WHEN rating = -1 THEN 1 END) as score
+                    FROM car_ratings
+                    GROUP BY car_id
+                ) r ON c.id = r.car_id
+                ORDER BY score DESC, likes DESC
+                LIMIT $1
+            ''', limit)
+            return [dict(row) for row in rows]
+
+    async def get_user_rating_stats(self, user_id: int) -> Dict:
+        """Получить статистику пользователя"""
+        async with self.pool.acquire() as conn:
+            # Количество одобренных предложений
+            approved_suggestions = await conn.fetchval('''
+                SELECT COUNT(*) FROM car_suggestions 
+                WHERE user_id = $1 AND status = 'approved'
+            ''', user_id)
+            
+            # Общий рейтинг предложенных машин
+            row = await conn.fetchrow('''
+                SELECT 
+                    COALESCE(SUM(CASE WHEN cr.rating = 1 THEN 1 ELSE 0 END), 0) as total_likes,
+                    COALESCE(SUM(CASE WHEN cr.rating = -1 THEN 1 ELSE 0 END), 0) as total_dislikes
+                FROM car_suggestions cs
+                LEFT JOIN cars c ON cs.brand = c.brand AND cs.model = c.model
+                LEFT JOIN car_ratings cr ON c.id = cr.car_id
+                WHERE cs.user_id = $1 AND cs.status = 'approved'
+            ''', user_id)
+            
+            total_likes = row['total_likes'] if row else 0
+            total_dislikes = row['total_dislikes'] if row else 0
+            
+            return {
+                'approved_suggestions': approved_suggestions or 0,
+                'total_likes': total_likes,
+                'total_dislikes': total_dislikes,
+                'user_score': total_likes - total_dislikes
+            }
 
     async def close(self):
         if self.pool:

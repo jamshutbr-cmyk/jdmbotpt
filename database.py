@@ -123,6 +123,18 @@ class Database:
                     last_seen TIMESTAMP DEFAULT CURRENT_TIMESTAMP
                 )
             ''')
+            
+            # Таблица лайков/дизлайков машин
+            await db.execute('''
+                CREATE TABLE IF NOT EXISTS car_ratings (
+                    user_id INTEGER,
+                    car_id INTEGER,
+                    rating INTEGER NOT NULL CHECK (rating IN (-1, 1)),
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    PRIMARY KEY (user_id, car_id),
+                    FOREIGN KEY (car_id) REFERENCES cars(id) ON DELETE CASCADE
+                )
+            ''')
             await db.execute('''
                 INSERT OR IGNORE INTO settings (key, value) 
                 VALUES ('welcome_text', '🚗 <b>Добро пожаловать в JDM Cars Bot!</b>\n\nЗдесь ты найдешь крутые тачки, сфотографированные на улицах города.\n\nВыбери действие из меню ниже:')
@@ -246,9 +258,25 @@ class Database:
             row = await cursor.fetchone()
             total_views = row[0] or 0
             
+            # Рейтинговая статистика
+            cursor = await db.execute('SELECT COUNT(CASE WHEN rating = 1 THEN 1 END) as likes FROM car_ratings')
+            row = await cursor.fetchone()
+            total_likes = row[0] or 0
+            
+            cursor = await db.execute('SELECT COUNT(CASE WHEN rating = -1 THEN 1 END) as dislikes FROM car_ratings')
+            row = await cursor.fetchone()
+            total_dislikes = row[0] or 0
+            
+            cursor = await db.execute('SELECT COUNT(DISTINCT car_id) as rated_cars FROM car_ratings')
+            row = await cursor.fetchone()
+            rated_cars = row[0] or 0
+            
             return {
                 'total_cars': total_cars,
-                'total_views': total_views
+                'total_views': total_views,
+                'total_likes': total_likes,
+                'total_dislikes': total_dislikes,
+                'rated_cars': rated_cars
             }
 
     # Избранное
@@ -540,6 +568,110 @@ class Database:
                 WHERE id = ?
             ''', (channel_id,))
             await db.commit()
+
+    # ============= РЕЙТИНГОВАЯ СИСТЕМА =============
+
+    async def set_car_rating(self, user_id: int, car_id: int, rating: int):
+        """Поставить лайк (1) или дизлайк (-1) машине"""
+        async with aiosqlite.connect(self.db_path) as db:
+            await db.execute('''
+                INSERT OR REPLACE INTO car_ratings (user_id, car_id, rating)
+                VALUES (?, ?, ?)
+            ''', (user_id, car_id, rating))
+            await db.commit()
+
+    async def get_car_rating(self, user_id: int, car_id: int) -> Optional[int]:
+        """Получить рейтинг пользователя для машины"""
+        async with aiosqlite.connect(self.db_path) as db:
+            cursor = await db.execute('''
+                SELECT rating FROM car_ratings WHERE user_id = ? AND car_id = ?
+            ''', (user_id, car_id))
+            row = await cursor.fetchone()
+            return row[0] if row else None
+
+    async def remove_car_rating(self, user_id: int, car_id: int):
+        """Убрать рейтинг (отменить лайк/дизлайк)"""
+        async with aiosqlite.connect(self.db_path) as db:
+            await db.execute('''
+                DELETE FROM car_ratings WHERE user_id = ? AND car_id = ?
+            ''', (user_id, car_id))
+            await db.commit()
+
+    async def get_car_rating_stats(self, car_id: int) -> Dict:
+        """Получить статистику рейтинга машины"""
+        async with aiosqlite.connect(self.db_path) as db:
+            cursor = await db.execute('''
+                SELECT 
+                    COUNT(CASE WHEN rating = 1 THEN 1 END) as likes,
+                    COUNT(CASE WHEN rating = -1 THEN 1 END) as dislikes,
+                    COUNT(*) as total_ratings
+                FROM car_ratings WHERE car_id = ?
+            ''', (car_id,))
+            row = await cursor.fetchone()
+            if row:
+                likes, dislikes, total = row
+                score = likes - dislikes  # общий рейтинг
+                return {
+                    'likes': likes,
+                    'dislikes': dislikes, 
+                    'total_ratings': total,
+                    'score': score
+                }
+            return {'likes': 0, 'dislikes': 0, 'total_ratings': 0, 'score': 0}
+
+    async def get_top_rated_cars(self, limit: int = 10) -> List[Dict]:
+        """Получить топ машин по рейтингу"""
+        async with aiosqlite.connect(self.db_path) as db:
+            db.row_factory = aiosqlite.Row
+            cursor = await db.execute('''
+                SELECT c.*, 
+                       COALESCE(r.likes, 0) as likes,
+                       COALESCE(r.dislikes, 0) as dislikes,
+                       COALESCE(r.score, 0) as score
+                FROM cars c
+                LEFT JOIN (
+                    SELECT car_id,
+                           COUNT(CASE WHEN rating = 1 THEN 1 END) as likes,
+                           COUNT(CASE WHEN rating = -1 THEN 1 END) as dislikes,
+                           COUNT(CASE WHEN rating = 1 THEN 1 END) - COUNT(CASE WHEN rating = -1 THEN 1 END) as score
+                    FROM car_ratings
+                    GROUP BY car_id
+                ) r ON c.id = r.car_id
+                ORDER BY score DESC, likes DESC
+                LIMIT ?
+            ''', (limit,))
+            rows = await cursor.fetchall()
+            return [dict(row) for row in rows]
+
+    async def get_user_rating_stats(self, user_id: int) -> Dict:
+        """Получить статистику пользователя"""
+        async with aiosqlite.connect(self.db_path) as db:
+            # Количество одобренных предложений
+            cursor = await db.execute('''
+                SELECT COUNT(*) FROM car_suggestions 
+                WHERE user_id = ? AND status = 'approved'
+            ''', (user_id,))
+            approved_suggestions = (await cursor.fetchone())[0]
+            
+            # Общий рейтинг предложенных машин
+            cursor = await db.execute('''
+                SELECT 
+                    COALESCE(SUM(CASE WHEN cr.rating = 1 THEN 1 ELSE 0 END), 0) as total_likes,
+                    COALESCE(SUM(CASE WHEN cr.rating = -1 THEN 1 ELSE 0 END), 0) as total_dislikes
+                FROM car_suggestions cs
+                LEFT JOIN cars c ON cs.brand = c.brand AND cs.model = c.model
+                LEFT JOIN car_ratings cr ON c.id = cr.car_id
+                WHERE cs.user_id = ? AND cs.status = 'approved'
+            ''', (user_id,))
+            row = await cursor.fetchone()
+            total_likes, total_dislikes = row if row else (0, 0)
+            
+            return {
+                'approved_suggestions': approved_suggestions,
+                'total_likes': total_likes,
+                'total_dislikes': total_dislikes,
+                'user_score': total_likes - total_dislikes
+            }
 
 
 db = Database()

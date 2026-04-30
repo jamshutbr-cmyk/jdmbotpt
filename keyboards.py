@@ -1,5 +1,6 @@
 from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
 from aiogram.utils.keyboard import InlineKeyboardBuilder
+from typing import Dict
 
 
 def main_menu_kb() -> InlineKeyboardMarkup:
@@ -11,6 +12,9 @@ def main_menu_kb() -> InlineKeyboardMarkup:
     )
     builder.row(
         InlineKeyboardButton(text="⭐ Избранное", callback_data="favorites"),
+        InlineKeyboardButton(text="🏆 Топ машин", callback_data="top_cars")
+    )
+    builder.row(
         InlineKeyboardButton(text="🎲 Случайная", callback_data="random")
     )
     builder.row(
@@ -30,7 +34,10 @@ def more_menu_kb() -> InlineKeyboardMarkup:
         InlineKeyboardButton(text="📊 Статистика", callback_data="stats")
     )
     builder.row(
-        InlineKeyboardButton(text="⚙️ Настройки", callback_data="user_settings"),
+        InlineKeyboardButton(text="👤 Мой рейтинг", callback_data="my_rating"),
+        InlineKeyboardButton(text="⚙️ Настройки", callback_data="user_settings")
+    )
+    builder.row(
         InlineKeyboardButton(text="ℹ️ О боте", callback_data="about")
     )
     builder.row(
@@ -89,9 +96,26 @@ def settings_menu_kb() -> InlineKeyboardMarkup:
     return builder.as_markup()
 
 
-def car_navigation_kb(current_index: int, total_cars: int, car_id: int, is_favorite: bool = False, is_admin: bool = False) -> InlineKeyboardMarkup:
+def car_navigation_kb(current_index: int, total_cars: int, car_id: int, is_favorite: bool = False, is_admin: bool = False, user_rating: int = None, rating_stats: Dict = None) -> InlineKeyboardMarkup:
     """Клавиатура навигации по машинам"""
     builder = InlineKeyboardBuilder()
+    
+    # Кнопки рейтинга
+    likes = rating_stats.get('likes', 0) if rating_stats else 0
+    dislikes = rating_stats.get('dislikes', 0) if rating_stats else 0
+    
+    like_text = "👍" if user_rating != 1 else "👍✅"
+    dislike_text = "👎" if user_rating != -1 else "👎✅"
+    
+    if likes > 0:
+        like_text += f" {likes}"
+    if dislikes > 0:
+        dislike_text += f" {dislikes}"
+    
+    builder.row(
+        InlineKeyboardButton(text=like_text, callback_data=f"rate_like_{car_id}"),
+        InlineKeyboardButton(text=dislike_text, callback_data=f"rate_dislike_{car_id}")
+    )
     
     # Кнопка избранного
     fav_text = "💔 Убрать из избранного" if is_favorite else "❤️ В избранное"
