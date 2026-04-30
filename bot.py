@@ -645,7 +645,7 @@ async def update_rating_keyboard(callback: CallbackQuery, car_id: int, user_id: 
 @dp.callback_query(F.data == "top_cars")
 async def show_top_cars(callback: CallbackQuery):
     """Показать топ машин — список с рейтингом"""
-    top_cars = await db.get_top_rated_cars(limit=10)
+    top_cars = await db.get_top_rated_cars(limit=3)
 
     if not top_cars:
         text = (
